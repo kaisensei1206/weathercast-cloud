@@ -10,16 +10,18 @@
 """
 
 import json
+import os
 import traceback
 
 from cities import CITIES
+from logger import log
+from weather_cache import cache_from_env
 from weather_client import UpstreamError, UpstreamTimeout
 from weather_service import CityNotFound, InvalidCity, MissingCity, get_weather
 
-
-def log(level: str, message: str, **fields) -> None:
-    # 一行一個 JSON，CloudWatch Logs Insights 可以直接用欄位查詢
-    print(json.dumps({"level": level, "message": message, **fields}, ensure_ascii=False))
+# 在模組載入（Lambda 冷啟動）時建立一次，之後同一個執行環境的請求都重複使用同一個連線。
+# 環境變數設定錯誤會在這裡丟出例外，冷啟動就失敗，CloudWatch 上看得到。
+CACHE = cache_from_env(os.environ)
 
 
 def respond(status: int, body: dict) -> dict:
@@ -57,7 +59,7 @@ def route(event: dict) -> dict:
 
 def weather(query: str | None) -> dict:
     try:
-        result = get_weather(query)
+        result = get_weather(query, cache=CACHE)
     except MissingCity:
         return error(400, "missing_city", "請提供 city 參數，例如 ?city=Tainan")
     except InvalidCity:
@@ -71,7 +73,8 @@ def weather(query: str | None) -> dict:
         log("warning", "upstream_error", city=query, detail=str(exc))
         return error(502, "upstream_error", "氣象資料來源暫時無法使用，請稍後再試")
 
-    log("info", "weather_ok", city=result["city"]["id"])
+    meta = result["meta"]
+    log("info", "weather_ok", city=result["city"]["id"], source=meta["source"], stale=meta["stale"])
     return respond(200, result)
 
 

@@ -5,13 +5,19 @@
 """
 
 import http.client
+import importlib
 import json
+import os
+import time
 import urllib.error
 
+import boto3
 import pytest
+from moto import mock_aws
 
 import handler
-from fakes import SAMPLE_CURRENT
+from fakes import SAMPLE_CURRENT, TABLE_NAME
+from weather_cache import WeatherCache
 
 
 class FakeContext:
@@ -240,3 +246,76 @@ def test_non_get_method_returns_405(api, method):
 @pytest.mark.parametrize("path", ["/", "/api", "/api/unknown", "/weather/tainan"])
 def test_unknown_path_returns_404(api, path):
     api(path).assert_error(404, "not_found")
+
+
+# --- DynamoDB 快取 -------------------------------------------------------------
+
+
+@pytest.fixture
+def cached_api(api, cache_table, monkeypatch):
+    """handler 接上 moto 模擬的 DynamoDB 快取。"""
+    monkeypatch.setattr(handler, "CACHE", WeatherCache(cache_table))
+    return api
+
+
+def test_second_request_is_served_from_cache(cached_api, upstream, capsys):
+    first = cached_api("/api/weather", {"city": "Tainan"})
+    second = cached_api("/api/weather", {"city": "台南"})
+
+    assert (first.status, second.status) == (200, 200)
+    assert first.body["meta"]["source"] == "upstream"
+    assert second.body["meta"]["source"] == "cache"
+    assert second.body["current"] == first.body["current"]
+    assert len(upstream.calls) == 1
+    assert [e["source"] for e in log_lines(capsys)] == ["upstream", "cache"]
+
+
+def test_stale_cache_is_served_when_upstream_is_down(cached_api, cache_table, upstream):
+    # 放一筆 1 小時前的資料：已過 10 分鐘的新鮮期，但還在 24 小時保留期內
+    an_hour_ago = int(time.time()) - 3600
+    WeatherCache(cache_table).put("tainan", {"temperature": 25.0}, an_hour_ago)
+    upstream.raises(TimeoutError("timed out"))
+
+    resp = cached_api("/api/weather", {"city": "Tainan"})
+
+    assert resp.status == 200
+    assert resp.body["current"] == {"temperature": 25.0}
+    assert resp.body["meta"]["stale"] is True
+    assert resp.body["meta"]["fetched_at"] == an_hour_ago
+
+
+def test_dynamodb_failure_does_not_break_the_api(api, upstream, monkeypatch):
+    broken = WeatherCache(boto3.resource("dynamodb").Table("table-that-does-not-exist"))
+    monkeypatch.setattr(handler, "CACHE", broken)
+    with mock_aws():
+        resp = api("/api/weather", {"city": "Tainan"})
+
+    assert resp.status == 200
+    assert resp.body["meta"]["source"] == "upstream"
+
+
+@pytest.fixture
+def reload_handler():
+    """重新載入 handler，模擬 Lambda 冷啟動時讀取環境變數；結束後還原。"""
+    yield lambda: importlib.reload(handler)
+    os.environ.pop("CACHE_TABLE", None)
+    os.environ.pop("CACHE_FRESH_SECONDS", None)
+    importlib.reload(handler)
+
+
+def test_cold_start_builds_cache_from_environment(cache_table, monkeypatch, reload_handler):
+    monkeypatch.setenv("CACHE_TABLE", TABLE_NAME)
+    reload_handler()
+    assert handler.CACHE.table.name == TABLE_NAME
+
+
+def test_cold_start_without_table_disables_cache(reload_handler):
+    reload_handler()
+    assert handler.CACHE is None
+
+
+def test_cold_start_fails_on_bad_cache_setting(monkeypatch, reload_handler):
+    monkeypatch.setenv("CACHE_TABLE", TABLE_NAME)
+    monkeypatch.setenv("CACHE_FRESH_SECONDS", "ten minutes")
+    with pytest.raises(ValueError, match="CACHE_FRESH_SECONDS"):
+        reload_handler()
