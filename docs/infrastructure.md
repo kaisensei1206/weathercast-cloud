@@ -71,4 +71,4 @@ terraform init -backend=false        # 只下載 provider，不連 state（不�
 terraform validate                   # 語法與設定檢查
 ```
 
-`terraform plan` 需要 AWS 帳號與 state bucket，完整的部署步驟見部署手冊。
+`terraform plan` 需要 AWS 帳號與 state bucket，完整的部署步驟見 [部署手冊](deployment.md)。
