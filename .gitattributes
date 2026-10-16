@@ -1,0 +1,3 @@
+# 一律用 LF 換行。Windows 預設 checkout 成 CRLF，打包出來的 Lambda zip 內容會和 Linux（CI）不同，
+# Terraform 會誤以為程式碼改了而重新部署。
+* text=auto eol=lf
