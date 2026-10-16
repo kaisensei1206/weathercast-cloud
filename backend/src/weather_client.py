@@ -4,6 +4,7 @@
 只用標準函式庫 urllib，Lambda 打包時不需要第三方套件。
 """
 
+import http.client
 import json
 import urllib.error
 import urllib.parse
@@ -59,6 +60,10 @@ def fetch_current(city: City, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict:
         raise UpstreamError(f"connection failed: {exc.reason}") from exc
     except TimeoutError as exc:
         raise UpstreamTimeout("read timeout") from exc
+    except (OSError, http.client.HTTPException) as exc:
+        # urllib 只把「送出請求」時的錯誤包成 URLError；
+        # 讀取回應時對方斷線或內容不完整，會直接丟出這兩類例外
+        raise UpstreamError(f"connection failed: {exc!r}") from exc
 
     try:
         data = json.loads(body)

@@ -81,7 +81,7 @@ flowchart LR
 ```
 backend/src/          Lambda 原始碼（handler → weather_service → weather_client）
 scripts/              本機工具
-tests/                pytest 單元測試
+tests/                pytest 單元測試（不連網路）
 terraform/bootstrap/  一次性資源：Terraform state bucket、GitHub OIDC、部署用 IAM Role
 terraform/main/       主要 AWS 資源
 docs/                 設計文件與架構圖
@@ -98,7 +98,10 @@ pip install -r requirements-dev.txt
 
 ruff check .                       # 程式風格與常見錯誤
 pytest                             # 單元測試
+pytest --cov                       # 單元測試 + 覆蓋率報告
 ```
+
+單元測試不會連到 Open-Meteo：`tests/conftest.py` 把 `urlopen` 換成假的，並擋掉所有對外連線。
 
 不用部署也能直接呼叫 Lambda handler（`/weather` 會真的連到 Open-Meteo）：
 
@@ -115,7 +118,7 @@ python scripts/invoke_local.py /api/weather                # 400
 - [x] 技術方案設計
 - [x] 專案骨架
 - [x] 後端 MVP（/health、/weather）
-- [ ] 單元測試
+- [x] 單元測試
 - [ ] DynamoDB 快取
 - [ ] Terraform
 - [ ] GitHub Actions CI/CD

@@ -6,12 +6,21 @@ requires-python = ">=3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# 讓測試直接 import backend/src 底下的模組，和 Lambda 執行時的匯入路徑一致
-pythonpath = ["backend/src"]
+# 讓測試直接 import backend/src 底下的模組（和 Lambda 執行時的匯入路徑一致），以及 tests/fakes.py
+pythonpath = ["backend/src", "tests"]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+# 讓 import 排序知道 backend/src 與 tests 底下的模組是本專案自己的
+src = ["backend/src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.coverage.run]
+source = ["backend/src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
