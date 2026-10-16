@@ -1,3 +1,4 @@
-# Lambda 執行時期的依賴套件。
-# 後端只使用 Python 標準函式庫（urllib、json）與 Lambda 內建的 boto3，
-# 因此部署封裝不需要額外安裝任何第三方套件。這個檔案刻意保持空白。
+# Runtime dependencies for the Lambda function.
+# The backend only uses the Python standard library (urllib, json) and the
+# boto3 that ships with the Lambda runtime, so this file is intentionally empty.
+# (Comments here stay ASCII: older pip on Windows reads this file as cp1252.)

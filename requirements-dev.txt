@@ -1,4 +1,4 @@
-# 本機開發與 CI 使用，不會被打包進 Lambda。
+# Local development and CI only; never packaged into the Lambda function.
 -r requirements.txt
 pytest==8.3.5
 moto[dynamodb]==5.1.4
