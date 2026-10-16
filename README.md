@@ -153,6 +153,10 @@ terraform init -backend=false
 terraform validate
 ```
 
+## 部署
+
+從建立 AWS 帳號權限、Terraform plan 與 apply、線上測試、查看 CloudWatch Logs、排除錯誤，到清除資源的完整步驟，見 [docs/deployment.md](docs/deployment.md)。
+
 ## 開發進度
 
 - [x] 技術方案設計
@@ -161,5 +165,6 @@ terraform validate
 - [x] 單元測試
 - [x] DynamoDB 快取（資料表在 Terraform 階段建立）
 - [x] Terraform（程式碼完成，尚未部署）
+- [x] 部署手冊（尚未實際部署）
 - [ ] GitHub Actions CI/CD
 - [ ] React 前端
