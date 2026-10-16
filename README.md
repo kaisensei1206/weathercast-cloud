@@ -140,6 +140,19 @@ python scripts/invoke_local.py /api/weather city=Tokyo     # 404
 python scripts/invoke_local.py /api/weather                # 400
 ```
 
+## 基礎設施
+
+所有 AWS 資源都在 `terraform/` 用 Terraform 管理：Lambda（Python 3.12、arm64）、API Gateway HTTP API、DynamoDB、IAM、CloudWatch Logs。資源說明、依賴關係，以及 Terraform 和 CI/CD 如何分工，見 [docs/infrastructure.md](docs/infrastructure.md)。
+
+不需要 AWS 帳號也能做的檢查：
+
+```bash
+cd terraform/main
+terraform fmt -check -recursive ..
+terraform init -backend=false
+terraform validate
+```
+
 ## 開發進度
 
 - [x] 技術方案設計
@@ -147,6 +160,6 @@ python scripts/invoke_local.py /api/weather                # 400
 - [x] 後端 MVP（/health、/weather）
 - [x] 單元測試
 - [x] DynamoDB 快取（資料表在 Terraform 階段建立）
-- [ ] Terraform
+- [x] Terraform（程式碼完成，尚未部署）
 - [ ] GitHub Actions CI/CD
 - [ ] React 前端
