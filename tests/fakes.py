@@ -3,6 +3,9 @@
 import io
 import json
 
+# moto 模擬的 DynamoDB 資料表名稱
+TABLE_NAME = "weathercast-cache-test"
+
 # Open-Meteo `current` 區塊的範例，欄位和真實回應相同
 SAMPLE_CURRENT = {
     "time": "2026-10-16T19:45",

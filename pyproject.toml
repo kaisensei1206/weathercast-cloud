@@ -8,6 +8,10 @@ requires-python = ">=3.12"
 testpaths = ["tests"]
 # 讓測試直接 import backend/src 底下的模組（和 Lambda 執行時的匯入路徑一致），以及 tests/fakes.py
 pythonpath = ["backend/src", "tests"]
+filterwarnings = [
+    # botocore 內部使用已棄用的 datetime.utcnow()，不是本專案的問題，等 botocore 更新
+    "ignore:datetime.datetime.utcnow:DeprecationWarning:botocore",
+]
 
 [tool.ruff]
 target-version = "py312"

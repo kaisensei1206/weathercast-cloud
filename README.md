@@ -31,6 +31,12 @@
 }
 ```
 
+| `meta` 欄位 | 說明 |
+|---|---|
+| `source` | `upstream`：這次剛向 Open-Meteo 取得；`cache`：從 DynamoDB 快取取得 |
+| `stale` | `true` 代表 Open-Meteo 暫時無法使用，回傳的是超過 10 分鐘的舊資料 |
+| `fetched_at` | 資料從 Open-Meteo 取得的時間（Unix 秒），不是這次請求的時間 |
+
 錯誤一律是 `{"error": "<代碼>", "message": "<說明>"}`，不會包含 traceback 或內部細節：
 
 | 狀態碼 | `error` | 情況 |
@@ -43,6 +49,27 @@
 | 502 | `upstream_error` | Open-Meteo 連線失敗、回傳 HTTP 錯誤或無效資料 |
 | 504 | `upstream_timeout` | Open-Meteo 3 秒內沒有回應 |
 | 500 | `internal_error` | 未預期錯誤；回應附 `request_id`，細節只寫進 log |
+
+Open-Meteo 失敗時，如果快取裡有 24 小時內的資料，會回 200 和 `stale: true`，不會回 502／504。
+
+## 快取
+
+每個城市在 DynamoDB 存一筆資料，10 分鐘內的查詢直接回傳快取，不呼叫 Open-Meteo。資料表設計、TTL 與故障處理見 [docs/cache.md](docs/cache.md)。
+
+```mermaid
+flowchart LR
+  R[請求] --> V{輸入有效？}
+  V -- 否 --> X[400 / 404]
+  V -- 是 --> C{快取 10 分鐘內？}
+  C -- 是 --> HIT[回傳快取]
+  C -- 否 --> O[Open-Meteo]
+  O -- 成功 --> W[寫入快取並回傳]
+  O -- 失敗 --> S{有 24 小時內的舊資料？}
+  S -- 是 --> STALE[回傳舊資料 stale=true]
+  S -- 否 --> E[502 / 504]
+```
+
+DynamoDB 故障時只記 log，照樣查 Open-Meteo，使用者不受影響。
 
 ## 預定功能
 
@@ -101,9 +128,9 @@ pytest                             # 單元測試
 pytest --cov                       # 單元測試 + 覆蓋率報告
 ```
 
-單元測試不會連到 Open-Meteo：`tests/conftest.py` 把 `urlopen` 換成假的，並擋掉所有對外連線。
+單元測試不會連到 Open-Meteo，也不會連到 AWS：`tests/conftest.py` 把 `urlopen` 換成假的、用 moto 在記憶體裡模擬 DynamoDB，並擋掉所有對外連線。
 
-不用部署也能直接呼叫 Lambda handler（`/weather` 會真的連到 Open-Meteo）：
+不用部署也能直接呼叫 Lambda handler（`/weather` 會真的連到 Open-Meteo）。沒有設定 `CACHE_TABLE` 環境變數時不使用快取，所以不需要 AWS 帳號：
 
 ```bash
 python scripts/invoke_local.py /api/health
@@ -119,7 +146,7 @@ python scripts/invoke_local.py /api/weather                # 400
 - [x] 專案骨架
 - [x] 後端 MVP（/health、/weather）
 - [x] 單元測試
-- [ ] DynamoDB 快取
+- [x] DynamoDB 快取（資料表在 Terraform 階段建立）
 - [ ] Terraform
 - [ ] GitHub Actions CI/CD
 - [ ] React 前端
