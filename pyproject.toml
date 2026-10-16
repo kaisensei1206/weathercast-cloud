@@ -1,0 +1,17 @@
+[project]
+name = "weathercast-cloud"
+version = "0.1.0"
+description = "查詢台灣 22 縣市天氣的 Serverless API（AWS Lambda + API Gateway + DynamoDB）"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 讓測試直接 import backend/src 底下的模組，和 Lambda 執行時的匯入路徑一致
+pythonpath = ["backend/src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

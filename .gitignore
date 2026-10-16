@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Lambda 封裝產物
+build/
+*.zip
+
+# Terraform：state 可能含有資源細節與機密，plan 檔也是
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# .terraform.lock.hcl 需要提交，確保每個環境使用同一版 provider
+
+# 機密與憑證
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials
+.aws/
+
+# 前端（之後的階段才會用到）
+node_modules/
+dist/
+
+# 編輯器與系統
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

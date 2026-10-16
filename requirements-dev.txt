@@ -1,0 +1,6 @@
+# 本機開發與 CI 使用，不會被打包進 Lambda。
+-r requirements.txt
+pytest==8.3.5
+moto[dynamodb]==5.1.4
+boto3==1.38.8
+ruff==0.11.8
