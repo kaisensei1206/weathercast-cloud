@@ -36,3 +36,18 @@ variable "github_repository" {
     error_message = "github_repository 的格式是 owner/name。"
   }
 }
+
+# GitHub 的 OIDC token 在 sub 裡同時寫入名稱和不會變的數字 ID（immutable subject），
+# 例如 repo:owner@123/name@456:ref:refs/heads/main。帳號或 repo 改名、或有人刪掉後用同名重建，ID 都不會相同。
+# 查詢：gh api repos/<owner>/<name> --jq '.owner.id, .id'
+variable "github_owner_id" {
+  description = "github_repository 擁有者（帳號或組織）的數字 ID"
+  type        = number
+  default     = 134856648
+}
+
+variable "github_repository_id" {
+  description = "github_repository 的數字 ID"
+  type        = number
+  default     = 1421996870
+}
