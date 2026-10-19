@@ -95,7 +95,7 @@ GitHub 和 repo 裡都沒有任何 AWS 金鑰。repo 變數 `AWS_DEPLOY_ROLE_ARN
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:kaisensei1206/weathercast-cloud:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:kaisensei1206@134856648/weathercast-cloud@1421996870:ref:refs/heads/main"
         }
       }
     }
@@ -106,6 +106,8 @@ GitHub 和 repo 裡都沒有任何 AWS 金鑰。repo 變數 `AWS_DEPLOY_ROLE_ARN
 - `aud`：token 必須是發給 AWS STS 的。
 - `sub`：只接受這個 repo 的 main 分支。PR 的 token 是 `repo:...:pull_request`，其他分支是 `ref:refs/heads/<分支>`，fork 的 repo 名稱不同，全部會被拒絕。
 - 用 `StringEquals`，不用 `StringLike` 加萬用字元，避免 `repo:kaisensei1206/*` 這類寫法讓同一個帳號下的其他 repo 也能使用。
+- `@134856648`、`@1421996870` 是帳號和 repo 的數字 ID。這個 repo 開啟了 GitHub 的 immutable subject，token 的 `sub` 會同時帶名稱和 ID。名稱可以改、刪掉後也能被別人用同名重建，ID 不會；所以就算有人註冊了同名帳號或 repo，也拿不到這個角色。ID 寫在 bootstrap 的 `github_owner_id`、`github_repository_id` 變數，查詢方式：`gh api repos/kaisensei1206/weathercast-cloud --jq '.owner.id, .id'`。
+- repo 用的是哪一種 `sub` 格式可以這樣查：`gh api repos/kaisensei1206/weathercast-cloud/actions/oidc/customization/sub`。`use_immutable_subject` 是 `true` 時就是上面的格式。
 
 所以「只能從 main 部署」有兩道保護：workflow 的 `if` 條件，以及 AWS 這邊的 `sub` 條件。就算有人改了 workflow 讓 PR 也跑 deploy，AWS 仍會拒絕。
 
@@ -205,7 +207,7 @@ gh variable list
 
 | 失敗的步驟 | 常見原因 |
 |---|---|
-| Configure AWS credentials | `Not authorized to perform sts:AssumeRoleWithWebIdentity`：repo 變數的角色 ARN 打錯、bootstrap 還沒 apply，或不是從 main 執行 |
+| Configure AWS credentials | `Not authorized to perform sts:AssumeRoleWithWebIdentity`：repo 變數的角色 ARN 打錯、bootstrap 還沒 apply、不是從 main 執行，或 token 的 `sub` 和信任政策不符。CloudTrail 的 `AssumeRoleWithWebIdentity` 事件裡，`userIdentity.userName` 就是 GitHub 實際送出的 `sub`，可以直接比對 |
 | Terraform init | `TF_STATE_BUCKET` 沒設或打錯 |
 | Terraform plan | `AccessDenied`：部署角色少了某個讀取權限，見第 3 節最後一段 |
 | Check plan | 這次合併改到 Lambda 以外的資源，見第 2 節 |
@@ -226,7 +228,7 @@ GitHub 免費方案的私人 repo 不能設定 branch protection 和 Environment
 ## 5. 目前限制
 
 - 部署角色的讀取權限還沒有在真實 AWS 驗證過，第一次執行可能需要補權限。
-- 沒有使用 GitHub Environment（需要人工核准的部署）：免費方案的私人 repo 不支援。repo 公開後，可以建立 `production` Environment、設定 required reviewers，並把信任政策的 `sub` 改成 `repo:kaisensei1206/weathercast-cloud:environment:production`。
+- 沒有使用 GitHub Environment（需要人工核准的部署）：免費方案的私人 repo 不支援。repo 公開後，可以建立 `production` Environment、設定 required reviewers，並把信任政策的 `sub` 改成 `repo:kaisensei1206@134856648/weathercast-cloud@1421996870:environment:production`。
 - 冒煙測試只打兩個端點，確認服務活著、能回傳台南的天氣，不是完整的整合測試。
 - 冒煙測試失敗時不會自動回滾，需要人決定是修正後重新部署，還是 revert 那次合併。
 - 第三方 action 用版本 tag（`@v5`），沒有釘到 commit SHA。要更嚴格可以改用 SHA，並用 Dependabot 更新。

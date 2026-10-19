@@ -31,7 +31,7 @@ data "aws_iam_policy_document" "github_deploy_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+      values   = ["${local.github_subject_prefix}:ref:refs/heads/main"]
     }
   }
 }
@@ -44,6 +44,10 @@ resource "aws_iam_role" "github_deploy" {
 }
 
 locals {
+  github_owner          = split("/", var.github_repository)[0]
+  github_repo_name      = split("/", var.github_repository)[1]
+  github_subject_prefix = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo_name}@${var.github_repository_id}"
+
   account_id   = data.aws_caller_identity.current.account_id
   arn_prefix   = "${var.region}:${local.account_id}"
   function_arn = "arn:aws:lambda:${local.arn_prefix}:function:${var.project_name}-api"

@@ -196,7 +196,9 @@ def test_workflow_region_matches_terraform():
 
 
 def test_deploy_role_trusts_only_main_branch_of_this_repo():
-    assert '"repo:${var.github_repository}:ref:refs/heads/main"' in OIDC_TF
+    assert '"${local.github_subject_prefix}:ref:refs/heads/main"' in OIDC_TF
+    prefix = 'github_subject_prefix = "repo:${local.github_owner}@${var.github_owner_id}/'
+    assert prefix + '${local.github_repo_name}@${var.github_repository_id}"' in OIDC_TF
     assert '"sts.amazonaws.com"' in OIDC_TF
 
 
