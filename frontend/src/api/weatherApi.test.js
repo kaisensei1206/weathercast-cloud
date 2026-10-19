@@ -38,7 +38,8 @@ describe('fetchWeather', () => {
 
     await expect(fetchWeather(' 臺南 ')).resolves.toEqual(TAINAN)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe(`/api/weather?city=${encodeURIComponent('臺南')}`)
+    // 和 .env.local 的 VITE_API_BASE_URL 無關，只確認路徑和編碼
+    expect(url).toBe(apiUrl(`/api/weather?city=${encodeURIComponent('臺南')}`))
     expect(init.signal).toBeInstanceOf(AbortSignal)
   })
 
@@ -109,7 +110,7 @@ describe('fetchCities', () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { cities: CITIES }))
 
     await expect(fetchCities()).resolves.toEqual(CITIES)
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/cities')
+    expect(fetchMock.mock.calls[0][0]).toBe(apiUrl('/api/cities'))
   })
 
   it('returns an empty list when the body has no cities', async () => {
