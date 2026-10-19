@@ -7,3 +7,8 @@ output "main_stack_init_command" {
   description = "在 terraform/main 執行的初始化指令"
   value       = "terraform init -backend-config=\"bucket=${aws_s3_bucket.tf_state.bucket}\""
 }
+
+output "github_deploy_role_arn" {
+  description = "GitHub repo 變數 AWS_DEPLOY_ROLE_ARN 要填的值"
+  value       = aws_iam_role.github_deploy.arn
+}

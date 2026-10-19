@@ -1,0 +1,113 @@
+# CI：每個 PR 和每次合併到 main 都會跑測試與 Terraform 檢查。
+# CD：只有 main 上、而且 CI 通過，才會用 OIDC 登入 AWS，把新版程式碼部署到已經存在的 Lambda。
+# 說明見 docs/cicd.md。
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: # 在 GitHub 上手動重新部署 main（例如部署失敗修好權限之後）
+
+# 預設沒有任何權限；需要的 job 自己再開
+permissions: {}
+
+env:
+  AWS_REGION: ap-northeast-1
+  TERRAFORM_VERSION: 1.16.5
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Unit tests
+        run: pytest --cov
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive terraform
+
+      # -backend=false：只下載 provider 做語法檢查，不連 AWS，也不需要憑證
+      - name: Terraform validate
+        run: |
+          for stack in bootstrap main; do
+            terraform -chdir=terraform/$stack init -backend=false -input=false
+            terraform -chdir=terraform/$stack validate
+          done
+
+  deploy:
+    name: Deploy
+    needs: test # test 失敗就不會執行
+    # PR 永遠不部署；只有 main 的 push 或手動觸發才部署
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # 向 GitHub 申請 OIDC token，換取 AWS 臨時憑證
+    # 同一時間只跑一個部署；後來的會排隊，不會中斷正在進行的 apply
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: terraform/main
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false # 讓 terraform output -raw 只輸出值本身
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-${{ github.run_id }}
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      # 打包 backend/src 並和線上版本比較
+      - name: Terraform plan
+        run: terraform plan -input=false -out=main.tfplan
+
+      # 部署角色只能更新 Lambda；plan 若改到其他資源就停下來，由人在本機處理
+      - name: Check plan only updates Lambda
+        run: |
+          terraform show -json main.tfplan > plan.json
+          python ../../scripts/check_plan.py plan.json
+
+      - name: Terraform apply
+        run: terraform apply -input=false main.tfplan
+
+      - name: Smoke test
+        run: python ../../scripts/smoke_test.py "$(terraform output -raw api_base_url)"

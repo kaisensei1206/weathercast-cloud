@@ -25,3 +25,14 @@ variable "noncurrent_version_retention_days" {
     error_message = "至少保留 1 天。"
   }
 }
+
+variable "github_repository" {
+  description = "可以使用部署角色的 GitHub repo（owner/name）"
+  type        = string
+  default     = "kaisensei1206/weathercast-cloud"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", var.github_repository))
+    error_message = "github_repository 的格式是 owner/name。"
+  }
+}

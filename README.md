@@ -107,7 +107,7 @@ flowchart LR
 
 ```
 backend/src/          Lambda 原始碼（handler → weather_service → weather_client）
-scripts/              本機工具
+scripts/              本機工具與 CI 用腳本（plan 檢查、冒煙測試）
 tests/                pytest 單元測試（不連網路）
 terraform/bootstrap/  一次性資源：Terraform state bucket、GitHub OIDC、部署用 IAM Role
 terraform/main/       主要 AWS 資源
@@ -157,6 +157,8 @@ terraform validate
 
 從建立 AWS 帳號權限、Terraform plan 與 apply、線上測試、查看 CloudWatch Logs、排除錯誤，到清除資源的完整步驟，見 [docs/deployment.md](docs/deployment.md)。
 
+部署後，每個 PR 由 GitHub Actions 跑測試與 Terraform 檢查，合併到 main 後用 OIDC 登入 AWS 自動部署並做冒煙測試，見 [docs/cicd.md](docs/cicd.md)。
+
 ## 開發進度
 
 - [x] 技術方案設計
@@ -164,7 +166,7 @@ terraform validate
 - [x] 後端 MVP（/health、/weather）
 - [x] 單元測試
 - [x] DynamoDB 快取（資料表在 Terraform 階段建立）
-- [x] Terraform（程式碼完成，尚未部署）
-- [x] 部署手冊（尚未實際部署）
-- [ ] GitHub Actions CI/CD
+- [x] Terraform
+- [x] 部署手冊與實際部署（2026-10-19 上線）
+- [x] GitHub Actions CI/CD（啟用步驟見 docs/cicd.md）
 - [ ] React 前端

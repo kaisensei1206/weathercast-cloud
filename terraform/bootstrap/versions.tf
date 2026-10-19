@@ -1,6 +1,6 @@
-# 一次性的基礎設施：存放主 stack Terraform state 的 S3 bucket。
-# 這個資料夾自己用 local state，由人手動 apply 一次；之後主 stack（../main）的 state 都放進這個 bucket。
-# 第八階段（GitHub Actions）會在這裡加上 GitHub OIDC 與部署用的 IAM Role。
+# 一次性的基礎設施，由人在本機 apply，state 存在本機（local state）：
+# - 存放主 stack Terraform state 的 S3 bucket（main.tf）
+# - GitHub Actions 用的 OIDC 身分提供者與部署角色（github_oidc.tf）
 
 terraform {
   required_version = ">= 1.10"
