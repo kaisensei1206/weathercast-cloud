@@ -37,7 +37,7 @@ override.tf.json
 credentials
 .aws/
 
-# 前端（之後的階段才會用到）
+# 前端
 node_modules/
 dist/
 
