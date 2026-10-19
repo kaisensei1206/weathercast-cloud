@@ -6,7 +6,7 @@
 - 所有資源都在 `ap-northeast-1`（東京）。
 - 每一步都標示了驗證狀態，說明見下一節。
 
-> **目前狀態：尚未部署。** 手冊裡所有對真實 AWS 的操作都還沒有人執行過。
+> **目前狀態：已部署（2026-10-19）。** 第 1 到 7 節已在真實 AWS 執行過一次（bootstrap 當時是 6 個資源，主 stack 13 個）。下方各節的 ⏳ 標示保留第七階段撰寫時的狀態。第八階段在 bootstrap 加了 GitHub Actions 用的 OIDC 與部署角色（+3 個資源），說明見 [cicd.md](cicd.md)。
 
 ## 驗證狀態
 
@@ -22,7 +22,7 @@
 | 手冊和程式碼一致 | ✅ | `tests/test_deployment_doc.py` 檢查手冊列出的資源、資源名稱、output、路由、變數預設值、zip 內容、事件檔，以及 PowerShell 參數有沒有加引號 |
 | `terraform fmt`、`terraform validate` | ✅ | 你的電腦（Terraform 1.16.5）和沙盒都通過 |
 | 本機工具版本 | ✅ | 你的電腦：Terraform 1.16.5、AWS CLI 2.38.1、Python 3.12.3 |
-| bootstrap 的 plan | 🧪 | `Plan: 6 to add, 0 to change, 0 to destroy.` |
+| bootstrap 的 plan | 🧪 | `Plan: 9 to add, 0 to change, 0 to destroy.`（第七階段的 6 個 S3 資源已在真實 AWS 建立 ✅；第八階段加的 3 個 IAM 資源只在沙盒驗證過） |
 | 主 stack 用 S3 backend 初始化與 plan | 🧪 | `Plan: 13 to add, 0 to change, 0 to destroy.` |
 | apply、讀取 output、再 plan 一次 | 🧪 | `13 added`；第二次 plan 顯示 `No changes` |
 | 只改程式碼時的 plan | 🧪 | `Plan: 0 to add, 1 to change, 0 to destroy.`，變更的是 `source_code_hash` |
@@ -249,6 +249,8 @@ aws sso login                                              # 憑證過期時才�
 
 主 stack 的 state 要放在 S3，所以先用 bootstrap 建立那個 bucket。bootstrap 本身的 state 存在本機。
 
+bootstrap 也建立 GitHub Actions 部署用的 OIDC 身分提供者和 IAM 角色（`github_oidc.tf`，說明見 [cicd.md](cicd.md)）。
+
 ```powershell
 cd E:\weathercast-cloud\terraform\bootstrap
 terraform init
@@ -257,13 +259,13 @@ terraform validate
 terraform plan "-out=bootstrap.tfplan"
 ```
 
-預期結果是 `Plan: 6 to add, 0 to change, 0 to destroy.`（🧪）。列出即將建立的資源：
+預期結果是 `Plan: 9 to add, 0 to change, 0 to destroy.`（🧪）。如果 bootstrap 已經 apply 過第七階段的版本，只會看到下面最後 3 個 IAM 相關資源：`Plan: 3 to add, 0 to change, 0 to destroy.`。列出即將建立的資源：
 
 ```powershell
 terraform show -no-color bootstrap.tfplan | Select-String "will be created|will be updated|must be replaced|will be destroyed" | ForEach-Object Line
 ```
 
-預期會有這 6 行，全部都是 `will be created`（🧪）：
+預期會有這 9 行，全部都是 `will be created`（🧪）：
 
 ```text
   # aws_s3_bucket.tf_state will be created
@@ -272,9 +274,12 @@ terraform show -no-color bootstrap.tfplan | Select-String "will be created|will 
   # aws_s3_bucket_public_access_block.tf_state will be created
   # aws_s3_bucket_server_side_encryption_configuration.tf_state will be created
   # aws_s3_bucket_versioning.tf_state will be created
+  # aws_iam_openid_connect_provider.github will be created
+  # aws_iam_role.github_deploy will be created
+  # aws_iam_role_policy.github_deploy will be created
 ```
 
-另外確認 plan 最後的 `state_bucket` 是 `weathercast-tfstate-<你的帳號 ID>`。確認無誤後執行：
+另外確認 plan 最後的 `state_bucket` 是 `weathercast-tfstate-<你的帳號 ID>`，`github_deploy_role_arn` 是 `arn:aws:iam::<你的帳號 ID>:role/weathercast-github-deploy`。確認無誤後執行：
 
 ```powershell
 terraform apply bootstrap.tfplan
@@ -753,7 +758,9 @@ IAM Identity Center、AWS Organizations 和預算提醒都不收費，可以留�
 
 ## 附錄 A：之後更新程式碼
 
-第八階段完成前，用手動方式更新：
+啟用 GitHub Actions 之後（[cicd.md](cicd.md)），合併到 main 就會自動部署，不需要下面的步驟。改到 Lambda 以外的基礎設施時，CD 會停下來，仍要在本機用下面的方式 plan 和 apply。
+
+手動更新：
 
 ```powershell
 cd E:\weathercast-cloud
