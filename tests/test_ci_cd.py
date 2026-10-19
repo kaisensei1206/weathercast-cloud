@@ -176,7 +176,10 @@ def test_deploy_requires_tests_and_never_runs_on_pull_requests():
 def test_only_deploy_job_can_request_aws_credentials():
     jobs = WORKFLOW["jobs"]
     assert jobs["deploy"]["permissions"]["id-token"] == "write"
-    assert "id-token" not in jobs["test"]["permissions"]
+    others = [name for name in jobs if name != "deploy"]
+    assert others == ["test", "frontend"]
+    for name in others:
+        assert "id-token" not in jobs[name]["permissions"]
 
 
 def test_workflow_uses_no_long_lived_aws_keys():

@@ -1,4 +1,4 @@
-# CI：每個 PR 和每次合併到 main 都會跑測試與 Terraform 檢查。
+# CI：每個 PR 和每次合併到 main 都會跑後端測試、Terraform 檢查和前端測試。
 # CD：只有 main 上、而且 CI 通過，才會用 OIDC 登入 AWS，把新版程式碼部署到已經存在的 Lambda。
 # 說明見 docs/cicd.md。
 name: CI/CD
@@ -57,6 +57,33 @@ jobs:
             terraform -chdir=terraform/$stack init -backend=false -input=false
             terraform -chdir=terraform/$stack validate
           done
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm ci 完全照 package-lock.json 安裝，每次都是同一組版本
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
 
   deploy:
     name: Deploy

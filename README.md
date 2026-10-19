@@ -1,6 +1,6 @@
 # WeatherCast Cloud API
 
-> 開發中。後端 API 已可在本機執行，尚未部署到 AWS。
+> 後端 API 已部署在 AWS（ap-northeast-1），合併到 main 會由 GitHub Actions 自動部署。前端目前在本機執行。
 
 查詢台灣 22 縣市目前天氣的 Serverless API。後端使用 Python，透過 Open-Meteo 取得氣象資料，部署在 AWS，所有雲端資源以 Terraform 管理，並用 GitHub Actions 自動測試與部署。
 
@@ -77,7 +77,7 @@ DynamoDB 故障時只記 log，照樣查 Open-Meteo，使用者不受影響。
 - `GET /api/cities`：支援的縣市清單
 - `GET /api/weather?city=Tainan`：查詢目前天氣（溫度、體感溫度、濕度、降雨量、風速、天氣代碼）
 - DynamoDB 快取：減少重複呼叫外部 API；外部 API 失敗時回傳較舊的資料並標示
-- React 前端：選擇縣市並顯示天氣
+- React 前端：輸入或選擇縣市並顯示天氣
 
 ## 預定架構
 
@@ -108,6 +108,7 @@ flowchart LR
 ```
 backend/src/          Lambda 原始碼（handler → weather_service → weather_client）
 scripts/              本機工具與 CI 用腳本（plan 檢查、冒煙測試）
+frontend/             React + Vite 前端
 tests/                pytest 單元測試（不連網路）
 terraform/bootstrap/  一次性資源：Terraform state bucket、GitHub OIDC、部署用 IAM Role
 terraform/main/       主要 AWS 資源
@@ -153,6 +154,21 @@ terraform init -backend=false
 terraform validate
 ```
 
+## 前端
+
+`frontend/` 是 React + Vite 的單頁介面：輸入城市或從清單選擇，顯示目前天氣，並處理載入中、找不到城市、網路失敗、伺服器錯誤等狀態。
+
+```bash
+cd frontend
+npm ci
+cp .env.example .env.local         # 設定 VITE_API_BASE_URL
+npm run dev                        # http://localhost:5173
+npm test
+npm run build
+```
+
+結構、設計決策、測試，以及部署到 S3 + CloudFront（私有 bucket + OAC）的 Terraform 設計建議，見 [docs/frontend.md](docs/frontend.md)。
+
 ## 部署
 
 從建立 AWS 帳號權限、Terraform plan 與 apply、線上測試、查看 CloudWatch Logs、排除錯誤，到清除資源的完整步驟，見 [docs/deployment.md](docs/deployment.md)。
@@ -169,4 +185,4 @@ terraform validate
 - [x] Terraform
 - [x] 部署手冊與實際部署（2026-10-19 上線）
 - [x] GitHub Actions CI/CD（啟用步驟見 docs/cicd.md）
-- [ ] React 前端
+- [x] React 前端（本機可執行；S3 + CloudFront 部署為設計建議，見 docs/frontend.md）
