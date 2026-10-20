@@ -48,8 +48,14 @@ frontend/
       SearchForm.jsx        城市輸入框、縣市下拉選單、查詢按鈕
       WeatherCard.jsx       天氣卡
       StatusMessage.jsx     載入中與錯誤訊息
+      WeatherBackdrop.jsx   動態天氣背景（純裝飾）
+    hooks/useWeatherScene.js        查詢狀態 → 背景場景
+    hooks/usePrefersReducedMotion.js 系統的「減少動態效果」設定
+    weather/scene.js        WMO 代碼分類、日夜判斷
+    weather/effects.js      每種天氣的特效設定（顏色、強度）
+    weather/particles.js    Canvas 雨、雪、星星
     App.jsx                 把以上組合起來
-    index.css               樣式，含手機版與深色模式
+    index.css               樣式，含手機版、深色模式與天氣背景
 ```
 
 資料流向：
@@ -107,9 +113,68 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
 - 跟著系統設定切換深色模式。
 - 載入中用 `role="status"`、錯誤用 `role="alert"`，螢幕閱讀器會念出來。
 
+### 動態天氣背景
+
+畫面後方會依目前天氣顯示對應的背景：晴天的陽光與光束、晴夜的月亮與星星、移動的雲、雨、雪、霧，以及雷雨偶爾的閃電。沒有使用圖片、影片或新套件。
+
+**三層，各管一件事：**
+
+| 檔案 | 輸入 → 輸出 | 說明 |
+|---|---|---|
+| `weather/scene.js` | API 回應 → 場景 `{ kind, intensity, cloudCover, night }` | 只看 `weather_code`（WMO 代碼），不看描述文字 |
+| `weather/effects.js` | 場景 → 特效設定 | 所有顏色和強度都在這裡，調外觀只改這個檔案 |
+| `components/WeatherBackdrop.jsx` | 特效設定 → 畫面 | CSS 畫天空、太陽、月亮、雲、霧；Canvas 畫雨、雪、星星 |
+
+**天氣分類：**
+
+| 類別 | WMO 代碼 | 特效 |
+|---|---|---|
+| `clear` | 0、1 | 白天：陽光、旋轉光束、淡淡的光斑。晚上：月亮、閃爍的星星 |
+| `cloudy` | 2 | 白雲慢慢飄，陽光減弱 |
+| `overcast` | 3 | 雲更厚、天空更灰，加一點霧，沒有陽光 |
+| `drizzle` | 51–57 | 稀疏、短、慢、淡的雨絲，加薄霧 |
+| `rain` | 61、63、66、80、81 | 中等密度的雨，依代碼強度調整 |
+| `heavy-rain` | 65、67、82 | 密、長、快的雨，烏雲 |
+| `storm` | 95、96、99 | 大雨、烏雲、7–15 秒隨機一次的柔和閃電 |
+| `snow` | 71–77、85、86 | 大小、速度、透明度不同的雪花，左右搖擺；數量依降雪強度 |
+| `fog` | 45、48 | 兩層半透明霧帶往相反方向飄 |
+| `unknown` | 其他代碼、缺少代碼 | 中性的天空，沒有特效 |
+| `idle` | 還沒查詢、查詢失敗 | 原本的背景色 |
+
+**日夜判斷：** 後端沒有日夜欄位，所以用 `current.time`（臺灣當地時間）和臺灣中心點的經緯度，以 NOAA 的簡化公式算太陽高度角，低於 -0.833° 就是晚上。所有縣市的日出日落相差不到 15 分鐘，用一個點就夠了，也不需要修改 API。時間格式不對時當作白天。
+
+**效能：**
+
+- Canvas 引擎只在元件掛上時建立一次，換天氣只呼叫 `setConfig`，不重建 Canvas，也不重新註冊事件。
+- 每一層的雨滴合併成一條路徑一次畫完；粒子數量依螢幕面積和 CPU 核心數調整（手機和低階裝置最少只有 25%）。
+- 沒有雨、雪、星星時，動畫迴圈會停止；分頁切到背景時也會暫停。
+- 雲和霧用 `transform: translateX` 移動，不用 `filter: blur`，交給 GPU 處理。
+- 天氣的強度用 CSS 變數傳給樣式，不放進 React state；閃電只切換 class，不會重新渲染。
+
+**切換天氣不閃爍：**
+
+- 天空顏色用 `@property` 註冊成顏色型別，可以用 transition 漸變。
+- 其他圖層用 opacity 淡入淡出，約 1.6 秒。
+- 查詢下一個城市時保留上一個背景，等新資料回來才切換。查詢失敗則回到原本的背景色。
+
+**閱讀與無障礙：**
+
+- 背景是 `position: fixed`、`z-index: 0`、`pointer-events: none`、`aria-hidden`，不會擋住點擊，螢幕閱讀器也會略過。
+- 內容在 `z-index: 1`，卡片維持原本的不透明底色，霧和雨都在卡片後面。
+- 背景是天空時，標題和頁尾改成淺色字，並且：
+  - 頂端有一層漸層加深；
+  - 雲在最上方淡出；
+  - 頁尾連結加半透明底。
+- 用瀏覽器實測 16 種場景，標題文字後方最亮的像素和文字的對比都在 4.5:1 以上（WCAG AA）。
+- 閃電最亮只到 30% 不透明度，一次閃光加一次較弱的餘光，間隔至少 7 秒，不會頻閃。
+- 系統設定「減少動態效果」時：
+  - 雲、霧、光束都停住；
+  - 不閃電；
+  - 雨和雪只畫一張靜態畫面，仍然看得出天氣。
+
 ## 4. 測試
 
-`npm test` 共 34 個測試，全部是假資料，不會呼叫真的 API：
+`npm test` 共 119 個測試，全部是假資料，不會呼叫真的 API：
 
 | 檔案 | 測什麼 |
 |---|---|
@@ -117,6 +182,12 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
 | `App.test.jsx` | 載入中狀態與停用按鈕；天氣卡的每個欄位；從下拉選單查詢；縣市清單載入失敗時仍能輸入；四種錯誤畫面；錯誤後重新查詢；天氣卡的重新查詢 |
 | `hooks/useWeather.test.js` | 較慢的舊回應不會蓋掉新結果；還沒查詢前按重新查詢不會出錯 |
 | `components/WeatherCard.test.jsx` | 舊資料（`stale`）顯示提醒，以及資料來源是即時還是快取 |
+| `weather/scene.test.js` | 每個 WMO 代碼的分類；未知、字串、`null` 代碼；夏至與冬至日出日落前後的日夜判斷；缺少資料不會出錯 |
+| `weather/effects.test.js` | 每種天氣日夜都有不同天空；陰天比多雲重；毛毛雨到大雨、小雪到大雪的強度遞增；只有雷雨有閃電 |
+| `weather/particles.test.js` | 依螢幕與 CPU 調整粒子數；只會有一個動畫迴圈；`destroy` 會停止迴圈並移除事件；減少動態效果時不跑動畫 |
+| `components/WeatherBackdrop.test.jsx` | `aria-hidden`；換天氣更新 CSS 變數；沒有 Canvas 和 `matchMedia` 也不會出錯；閃電計時器在換天氣、卸載、開啟減少動態效果時都會清掉 |
+| `hooks/useWeatherScene.test.js` | 載入中保留上一個背景；失敗回到預設；同一份資料回傳同一個物件 |
+| `App.test.jsx`（新增一個） | 換城市時背景跟著換，查詢失敗回到預設 |
 
 CI 的 `Frontend` job 在每個 PR 都會執行 `npm ci`、`npm test`、`npm run build`。
 
@@ -207,3 +278,5 @@ bucket policy 的重點是 `AWS:SourceArn` 條件。沒有這個條件，帳號�
 - 前端還沒部署到 AWS，只能在本機執行。上面的 S3 + CloudFront 是設計建議。
 - 測試用 jsdom 模擬瀏覽器，沒有真實瀏覽器的端對端測試。開發時有用真實瀏覽器（Chromium）搭配線上 API 手動確認過桌面版和手機版畫面。
 - 沒有前端的覆蓋率報告。
+- 動態背景的外觀、對比和快速切換是用真實瀏覽器（Chromium）手動跑腳本確認的，沒有放進 CI。
+- 日夜判斷用臺灣中心點計算，日出日落前後幾分鐘可能和實際不同。
