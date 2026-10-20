@@ -135,4 +135,40 @@ describe('App', () => {
     expect(fetchWeather).toHaveBeenCalledTimes(2)
     expect(fetchWeather).toHaveBeenLastCalledWith('Tainan')
   })
+
+  it('changes the weather background when switching cities, and resets it on errors', async () => {
+    const user = userEvent.setup()
+    const sunnyNoon = {
+      ...TAINAN,
+      city: { id: 'taipei', name: '臺北市', name_en: 'Taipei' },
+      current: { ...TAINAN.current, time: '2026-10-16T12:00', weather_code: 0, description: '晴' },
+    }
+    fetchWeather
+      .mockResolvedValueOnce(TAINAN)
+      .mockResolvedValueOnce(sunnyNoon)
+      .mockRejectedValueOnce(new ApiError('not_found', '找不到城市：Tokyo'))
+    render(<App />)
+    const backdrop = screen.getByTestId('weather-backdrop')
+    const app = backdrop.nextElementSibling
+    expect(backdrop).toHaveAttribute('data-kind', 'idle')
+    expect(app).toHaveAttribute('data-sky-tone', 'theme')
+
+    await searchFor(user, 'Tainan')
+    await screen.findByRole('article')
+    expect(backdrop).toHaveAttribute('data-kind', 'rain')
+    expect(backdrop).toHaveAttribute('data-night', 'true')
+    expect(app).toHaveAttribute('data-sky-tone', 'dark')
+
+    await user.clear(screen.getByLabelText('城市名稱'))
+    await searchFor(user, 'Taipei')
+    await screen.findByRole('heading', { name: '臺北市' })
+    expect(backdrop).toHaveAttribute('data-kind', 'clear')
+    expect(backdrop).toHaveAttribute('data-night', 'false')
+
+    await user.clear(screen.getByLabelText('城市名稱'))
+    await searchFor(user, 'Tokyo')
+    await screen.findByRole('alert')
+    expect(backdrop).toHaveAttribute('data-kind', 'idle')
+    expect(screen.getAllByTestId('weather-backdrop')).toHaveLength(1)
+  })
 })
