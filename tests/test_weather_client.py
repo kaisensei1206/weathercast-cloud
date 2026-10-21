@@ -4,17 +4,23 @@
 """
 
 import http.client
+import io
+import json
 import socket
+import time
 import urllib.error
 import urllib.parse
 
 import pytest
 
+import weather_client
 from cities import find_city
 from fakes import SAMPLE_CURRENT
 from weather_client import (
     CURRENT_FIELDS,
     DEFAULT_TIMEOUT_SECONDS,
+    MAX_RESPONSE_BYTES,
+    UpstreamBackoff,
     UpstreamError,
     UpstreamTimeout,
     build_url,
@@ -131,3 +137,61 @@ def test_missing_or_invalid_fields_raise_upstream_error(upstream, payload):
 def test_parse_current_accepts_integers_and_floats():
     current = {**SAMPLE_CURRENT, "temperature_2m": 28, "precipitation": 1.5}
     assert parse_current({"current": current}) == current
+
+
+# --- 安全審查後加的回歸測試 -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param(b"NaN", id="nan"),
+        pytest.param(b"Infinity", id="infinity"),
+        pytest.param(b"-Infinity", id="minus-infinity"),
+        pytest.param(b"1e999", id="overflow-to-inf"),
+        pytest.param(b"true", id="bool"),
+    ],
+)
+def test_non_finite_or_boolean_numbers_are_rejected(upstream, raw):
+    # NaN/Infinity 不是合法 JSON，回給瀏覽器會解析失敗，也不能寫進快取
+    body = json.dumps({"current": SAMPLE_CURRENT}).replace("27.7", "@").encode()
+    upstream.returns(body.replace(b"@", raw))
+    with pytest.raises(UpstreamError):
+        fetch_current(TAINAN)
+
+
+def test_oversized_response_is_rejected(upstream):
+    upstream.returns(b" " * (MAX_RESPONSE_BYTES + 1))
+    with pytest.raises(UpstreamError, match="too large"):
+        fetch_current(TAINAN)
+
+
+def test_slow_upstream_is_cut_off_at_the_total_deadline(monkeypatch):
+    # urllib 的 timeout 只限制每次讀取；上游一直慢慢送資料時，靠總時限結束
+    def slow_urlopen(url, timeout=None):
+        time.sleep(1.0)
+        return io.BytesIO(json.dumps({"current": SAMPLE_CURRENT}).encode())
+
+    monkeypatch.setattr(weather_client.urllib.request, "urlopen", slow_urlopen)
+    started = time.monotonic()
+    with pytest.raises(UpstreamTimeout, match="deadline"):
+        fetch_current(TAINAN, deadline=0.2)
+    assert time.monotonic() - started < 0.8
+
+
+def test_backoff_skips_the_upstream_for_a_while_after_a_failure():
+    clock = [1000.0]
+    backoff = UpstreamBackoff(seconds=30, monotonic=lambda: clock[0])
+    calls = []
+
+    def failing():
+        calls.append(1)
+        raise UpstreamTimeout("read timeout")
+
+    for _ in range(5):
+        with pytest.raises(UpstreamError):
+            backoff.call(failing)
+    assert len(calls) == 1  # 後面 4 次沒有真的呼叫上游
+
+    clock[0] += 30
+    assert backoff.call(lambda: "ok") == "ok"  # 時間到了就重新嘗試

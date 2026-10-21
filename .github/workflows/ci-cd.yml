@@ -25,9 +25,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -44,7 +44,7 @@ jobs:
       - name: Unit tests
         run: pytest --cov
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
@@ -68,9 +68,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: frontend/.nvmrc
           cache: npm
@@ -83,8 +83,20 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # 不設定 VITE_API_BASE_URL：前端用相對路徑 /api，由 CloudFront 轉給 API Gateway
       - name: Build
         run: npm run build
+
+      # 部署用的檔案在這個沒有 AWS 權限的 job 建好，deploy job 只下載結果，
+      # 不在拿到 AWS 憑證之後執行 npm 套件的程式碼
+      - name: Upload build for deploy
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     name: Deploy
@@ -103,25 +115,19 @@ jobs:
       run:
         working-directory: terraform/main
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false # 讓 terraform output -raw 只輸出值本身
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -152,12 +158,12 @@ jobs:
           echo "frontend_bucket=$(terraform output -raw frontend_bucket)" >> "$GITHUB_OUTPUT"
           echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
 
-      # 不設定 VITE_API_BASE_URL：前端用相對路徑 /api，由 CloudFront 轉給 API Gateway
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
+      # frontend job 建好的檔案；這個 job 有 AWS 憑證，所以不在這裡執行 npm
+      - name: Download frontend build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend-dist
+          path: frontend/dist
 
       # 先傳 assets 再傳 index.html：使用者不會拿到「指向還沒上傳的檔案」的首頁。
       # assets 的檔名含內容 hash，內容一變檔名就變，所以可以永久快取；

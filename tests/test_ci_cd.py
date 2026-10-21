@@ -334,3 +334,37 @@ def test_deploy_uploads_assets_before_index_and_uses_relative_api():
     text = (ROOT / ".github" / "workflows" / "ci-cd.yml").read_text("utf-8")
     assert "VITE_API_BASE_URL=" not in text and "VITE_API_BASE_URL:" not in text
     assert "--frontend" in steps[names.index("Smoke test")]["run"]
+
+
+# --- 供應鏈：有 AWS 憑證的 job 只執行釘選過的程式碼 -----------------------------
+
+
+def test_every_action_is_pinned_to_a_commit_sha():
+    # tag（例如 @v5）可以被改指到別的 commit；SHA 不行。版本號寫在後面的註解
+    uses = [s["uses"] for job in WORKFLOW["jobs"].values() for s in job["steps"] if "uses" in s]
+    assert uses
+    unpinned = [u for u in uses if not re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", u)]
+    assert unpinned == []
+
+
+def test_job_with_aws_credentials_does_not_run_npm():
+    # npm 套件（含建置工具）的程式碼不能在拿到 AWS 臨時憑證的 job 裡執行
+    for name, job in WORKFLOW["jobs"].items():
+        if job.get("permissions", {}).get("id-token") == "write":
+            steps = json.dumps(job["steps"])
+            assert "npm " not in steps, name
+            assert "setup-node" not in steps, name
+
+
+def test_deploy_uses_the_build_from_the_frontend_job():
+    frontend = WORKFLOW["jobs"]["frontend"]
+    assert "id-token" not in frontend["permissions"]
+    upload = [s for s in frontend["steps"] if "upload-artifact" in s.get("uses", "")]
+    assert len(upload) == 1 and upload[0]["with"]["name"] == "frontend-dist"
+
+    deploy = WORKFLOW["jobs"]["deploy"]["steps"]
+    names = [s.get("name") for s in deploy]
+    download = deploy[names.index("Download frontend build")]
+    assert "download-artifact" in download["uses"]
+    assert download["with"]["name"] == "frontend-dist"
+    assert names.index("Download frontend build") < names.index("Upload frontend to S3")

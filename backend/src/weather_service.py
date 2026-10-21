@@ -8,6 +8,7 @@ handler.py 負責把 HTTP 請求轉成這裡的函式呼叫，再把結果或例
 2. 快取還新鮮（Cache Hit）→ 直接回傳
 3. 否則呼叫 Open-Meteo（Cache Miss）→ 成功就寫回快取
 4. Open-Meteo 失敗但有未超過保留期限的舊資料 → 回傳舊資料並標示 stale
+   失敗後 30 秒內不再呼叫 Open-Meteo（BACKOFF），直接走這一步，不用每個請求都等逾時
 快取讀寫失敗只記 log，當作沒有快取繼續處理（fail-open）。
 """
 
@@ -17,9 +18,12 @@ from collections.abc import Callable
 from cities import City, find_city
 from logger import log
 from weather_cache import CacheEntry, CacheError, WeatherCache
-from weather_client import UpstreamError, fetch_current
+from weather_client import UpstreamBackoff, UpstreamError, fetch_current
 
 MAX_CITY_LENGTH = 50
+
+# Open-Meteo 失敗後暫停呼叫一段時間；每個 Lambda 執行環境一份
+BACKOFF = UpstreamBackoff()
 
 # WMO weather code → 中文描述
 WEATHER_DESCRIPTIONS = {
@@ -129,6 +133,7 @@ def get_weather(
     fetcher: Callable[[City], dict] = fetch_current,
     clock: Callable[[], float] = time.time,
     cache: WeatherCache | None = None,
+    backoff: UpstreamBackoff = BACKOFF,
 ) -> dict:
     """查詢城市目前天氣。fetcher、clock、cache 都可替換，方便測試時不呼叫真實 API 和 AWS。"""
     city = resolve_city(query)
@@ -139,7 +144,7 @@ def get_weather(
         return build_response(city, cached.current, cached.fetched_at, "cache", stale=False)
 
     try:
-        current = to_api_current(fetcher(city))
+        current = to_api_current(backoff.call(fetcher, city))
     except UpstreamError as exc:
         if cached is None:
             raise
