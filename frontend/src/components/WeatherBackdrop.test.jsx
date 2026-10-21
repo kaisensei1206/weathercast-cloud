@@ -34,7 +34,7 @@ describe('WeatherBackdrop', () => {
     expect(backdrop).toHaveAttribute('aria-hidden', 'true')
     expect(backdrop).toHaveClass('wx')
     expect(backdrop).toHaveAttribute('data-kind', 'idle')
-    expect(backdrop).toHaveAttribute('data-sky', 'off')
+    expect(backdrop.style.getPropertyValue('--shade')).toBe('0')
   })
 
   it('exposes the scene and its strengths as attributes and CSS variables', () => {
@@ -42,15 +42,13 @@ describe('WeatherBackdrop', () => {
     const backdrop = screen.getByTestId('weather-backdrop')
     expect(backdrop).toHaveAttribute('data-kind', 'clear')
     expect(backdrop).toHaveAttribute('data-night', 'true')
-    expect(backdrop).toHaveAttribute('data-sky', 'on')
-    expect(backdrop.style.getPropertyValue('--moon')).toBe('1')
-    expect(backdrop.style.getPropertyValue('--sun')).toBe('0')
-    expect(backdrop.style.getPropertyValue('--sky-top')).toBe('#0b1531')
+    expect(backdrop.style.getPropertyValue('--shade')).toBe('0.15')
+    expect(backdrop.querySelector('.wx__sky, .wx__sun, .wx__moon')).toBeNull() // 地圖上不畫天空
 
     rerender(<WeatherBackdrop scene={STORM} />)
     expect(backdrop).toHaveAttribute('data-kind', 'storm')
     expect(backdrop).toHaveAttribute('data-cloud-shade', 'dark')
-    expect(backdrop.style.getPropertyValue('--moon')).toBe('0')
+    expect(backdrop.style.getPropertyValue('--shade')).toBe('0.2')
   })
 
   it('renders without crashing when canvas and matchMedia are missing', () => {

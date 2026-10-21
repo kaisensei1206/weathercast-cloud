@@ -152,15 +152,12 @@ describe('App', () => {
       .mockRejectedValueOnce(new ApiError('not_found', '找不到城市：Tokyo'))
     render(<App />)
     const backdrop = screen.getByTestId('weather-backdrop')
-    const app = backdrop.nextElementSibling
     expect(backdrop).toHaveAttribute('data-kind', 'idle')
-    expect(app).toHaveAttribute('data-sky-tone', 'theme')
 
     await searchFor(user, 'Tainan')
     await screen.findByRole('article')
     expect(backdrop).toHaveAttribute('data-kind', 'rain')
     expect(backdrop).toHaveAttribute('data-night', 'true')
-    expect(app).toHaveAttribute('data-sky-tone', 'dark')
 
     await user.clear(screen.getByLabelText('城市名稱'))
     await searchFor(user, 'Taipei')
