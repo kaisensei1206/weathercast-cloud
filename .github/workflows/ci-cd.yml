@@ -1,5 +1,6 @@
 # CI：每個 PR 和每次合併到 main 都會跑後端測試、Terraform 檢查和前端測試。
-# CD：只有 main 上、而且 CI 通過，才會用 OIDC 登入 AWS，把新版程式碼部署到已經存在的 Lambda。
+# CD：只有 main 上、而且 CI 通過，才會用 OIDC 登入 AWS，把新版程式碼部署到已經存在的 Lambda，
+#     再把前端上傳到已經存在的 S3 bucket，並清除 CloudFront 快取。
 # 說明見 docs/cicd.md。
 name: CI/CD
 
@@ -87,7 +88,7 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: test # test 失敗就不會執行
+    needs: [test, frontend] # 任何一個失敗就不會執行
     # PR 永遠不部署；只有 main 的 push 或手動觸發才部署
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -107,6 +108,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -136,5 +143,41 @@ jobs:
       - name: Terraform apply
         run: terraform apply -input=false main.tfplan
 
+      # 先讀出 output，後面的步驟都在 frontend 目錄執行
+      - name: Read Terraform outputs
+        id: tf
+        run: |
+          echo "api_base_url=$(terraform output -raw api_base_url)" >> "$GITHUB_OUTPUT"
+          echo "frontend_url=$(terraform output -raw frontend_url)" >> "$GITHUB_OUTPUT"
+          echo "frontend_bucket=$(terraform output -raw frontend_bucket)" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
+
+      # 不設定 VITE_API_BASE_URL：前端用相對路徑 /api，由 CloudFront 轉給 API Gateway
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      # 先傳 assets 再傳 index.html：使用者不會拿到「指向還沒上傳的檔案」的首頁。
+      # assets 的檔名含內容 hash，內容一變檔名就變，所以可以永久快取；
+      # index.html 等其他檔案設成 no-cache，每次都向 CloudFront 確認有沒有新版。
+      - name: Upload frontend to S3
+        working-directory: frontend
+        env:
+          BUCKET: ${{ steps.tf.outputs.frontend_bucket }}
+        run: |
+          aws s3 sync dist/assets "s3://$BUCKET/assets" --delete --cache-control "public,max-age=31536000,immutable"
+          aws s3 sync dist "s3://$BUCKET" --delete --exclude "assets/*" --cache-control "no-cache"
+
+      - name: Invalidate CloudFront cache
+        run: >-
+          aws cloudfront create-invalidation
+          --distribution-id "${{ steps.tf.outputs.distribution_id }}"
+          --paths "/" "/index.html"
+
+      # 直接打 API Gateway，也透過 CloudFront 打一次，確認首頁和 /api/* 轉發都正常
       - name: Smoke test
-        run: python ../../scripts/smoke_test.py "$(terraform output -raw api_base_url)"
+        run: |
+          python ../../scripts/smoke_test.py "${{ steps.tf.outputs.api_base_url }}"
+          python ../../scripts/smoke_test.py "${{ steps.tf.outputs.frontend_url }}" --frontend

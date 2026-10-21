@@ -6,7 +6,7 @@
 - 所有資源都在 `ap-northeast-1`（東京）。
 - 每一步都標示了驗證狀態，說明見下一節。
 
-> **目前狀態：已部署（2026-10-19）。** 第 1 到 7 節已在真實 AWS 執行過一次（bootstrap 當時是 6 個資源，主 stack 13 個）。下方各節的 ⏳ 標示保留第七階段撰寫時的狀態。第八階段在 bootstrap 加了 GitHub Actions 用的 OIDC 與部署角色（+3 個資源），說明見 [cicd.md](cicd.md)。
+> **目前狀態：已部署（2026-10-19）。** 第 1 到 7 節已在真實 AWS 執行過一次（bootstrap 當時是 6 個資源，主 stack 13 個）。下方各節的 ⏳ 標示保留第七階段撰寫時的狀態。第八階段在 bootstrap 加了 GitHub Actions 用的 OIDC 與部署角色（+3 個資源），說明見 [cicd.md](cicd.md)。之後主 stack 加了前端的 S3 + CloudFront（+6 個資源，共 19 個），已經部署過的環境怎麼升級見 [frontend.md 第 5 節](frontend.md#5-部署到-s3--cloudfront)。
 
 ## 驗證狀態
 
@@ -23,10 +23,10 @@
 | `terraform fmt`、`terraform validate` | ✅ | 你的電腦（Terraform 1.16.5）和沙盒都通過 |
 | 本機工具版本 | ✅ | 你的電腦：Terraform 1.16.5、AWS CLI 2.38.1、Python 3.12.3 |
 | bootstrap 的 plan | 🧪 | `Plan: 9 to add, 0 to change, 0 to destroy.`（第七階段的 6 個 S3 資源已在真實 AWS 建立 ✅；第八階段加的 3 個 IAM 資源只在沙盒驗證過） |
-| 主 stack 用 S3 backend 初始化與 plan | 🧪 | `Plan: 13 to add, 0 to change, 0 to destroy.` |
-| apply、讀取 output、再 plan 一次 | 🧪 | `13 added`；第二次 plan 顯示 `No changes` |
+| 主 stack 用 S3 backend 初始化與 plan | 🧪 | `Plan: 19 to add, 0 to change, 0 to destroy.`（13 個後端資源已在真實 AWS 建立 ✅；前端的 6 個只在沙盒驗證過） |
+| apply、讀取 output、再 plan 一次 | 🧪 | `19 added`；只有後端資源時，第二次 plan 顯示 `No changes`（前端見下方 moto 的限制） |
 | 只改程式碼時的 plan | 🧪 | `Plan: 0 to add, 1 to change, 0 to destroy.`，變更的是 `source_code_hash` |
-| plan -destroy、destroy、bootstrap 防刪 | 🧪 | `13 to destroy`、`13 destroyed`；bootstrap 回 `Instance cannot be destroyed` |
+| plan -destroy、destroy、bootstrap 防刪 | 🧪 | 只有後端時 `13 to destroy`、`13 destroyed`；加上前端後 plan 是 `19 to destroy`，但 moto 無法停用 CloudFront，destroy 沒有跑完。bootstrap 回 `Instance cannot be destroyed` |
 | 手冊裡的 AWS CLI 查詢指令 | 🧪 | 用 AWS CLI 2.38.1（和你電腦同版）對 moto 執行，輸出格式符合手冊 |
 | 直接呼叫 Lambda 用的事件檔 | ✅ | 用 PowerShell 產生 JSON 檔，交給本機 handler 執行，`/api/health` 回 200 |
 | AWS 帳號設定、SSO 登入、真實的 plan 與 apply、線上測試、CloudWatch、費用、清除 | ⏳ | 需要你的 AWS 帳號 |
@@ -35,7 +35,8 @@
 
 - moto 不支援 bucket policy 的 `Bool` 條件（`DenyInsecureTransport` 用到它），模擬時拿掉了 bucket policy。
 - moto 的 S3 lifecycle 設定會一直卡在等待狀態，模擬時那一項建立失敗。
-- 這兩點都是 moto 的限制，真實 AWS 會怎麼表現，要等你執行才知道。
+- moto 不會記錄 CloudFront 的 `cache_policy_id`，所以 apply 之後再 plan 一次，會顯示 distribution 和 bucket policy 要更新；也不支援停用 distribution，所以 destroy 會失敗。
+- 這些都是 moto 的限制，真實 AWS 會怎麼表現，要等你執行才知道。
 - PowerShell 指令是在 Linux 上用 PowerShell 7.4 測的，參數模式設成 `Legacy`，模擬 Windows PowerShell 5.1 傳參數給外部程式的方式。不是在 Windows 上測的。
 
 ## 部署順序
@@ -306,7 +307,7 @@ terraform plan "-out=main.tfplan"
 | `init` | `Successfully configured the backend "s3"!` 和 `Terraform has been successfully initialized!`（🧪） |
 | `fmt -check` | 沒有輸出。如果列出檔名，執行 `terraform fmt -recursive ..`，修正後再 commit |
 | `validate` | `Success! The configuration is valid.`（✅） |
-| `plan` | `Plan: 13 to add, 0 to change, 0 to destroy.`（🧪），同時產生 `build\lambda.zip` |
+| `plan` | `Plan: 19 to add, 0 to change, 0 to destroy.`（🧪），同時產生 `build\lambda.zip` |
 
 - **為什麼 init 要帶 bucket？** 因為 backend 的 bucket 名稱含帳號 ID，沒有寫死在程式碼裡，要在 init 時用 `-backend-config` 帶入。
 - **init 問要不要複製 state？** 如果出現 `Do you want to copy existing state to the new backend?`，代表 `terraform\main` 裡有舊的本機 state。先停下來確認，正常情況不會出現這個問題。
@@ -319,7 +320,7 @@ terraform plan "-out=main.tfplan"
 terraform show -no-color main.tfplan | Select-String "will be created|will be updated|must be replaced|will be destroyed" | ForEach-Object Line
 ```
 
-第一次部署時，預期有 13 行，而且全部是 `will be created`（🧪）：
+第一次部署時，預期有 19 行，而且全部是 `will be created`（🧪）。前 13 個是後端，`cloudfront` 和 `s3_bucket` 開頭的 6 個是前端：
 
 ```text
   # aws_apigatewayv2_api.http will be created
@@ -328,6 +329,8 @@ terraform show -no-color main.tfplan | Select-String "will be created|will be up
   # aws_apigatewayv2_route.routes["GET /api/health"] will be created
   # aws_apigatewayv2_route.routes["GET /api/weather"] will be created
   # aws_apigatewayv2_stage.default will be created
+  # aws_cloudfront_distribution.frontend will be created
+  # aws_cloudfront_origin_access_control.frontend will be created
   # aws_cloudwatch_log_group.api_access will be created
   # aws_cloudwatch_log_group.lambda will be created
   # aws_dynamodb_table.cache will be created
@@ -335,10 +338,14 @@ terraform show -no-color main.tfplan | Select-String "will be created|will be up
   # aws_iam_role_policy.lambda will be created
   # aws_lambda_function.api will be created
   # aws_lambda_permission.apigw will be created
+  # aws_s3_bucket.frontend will be created
+  # aws_s3_bucket_policy.frontend will be created
+  # aws_s3_bucket_public_access_block.frontend will be created
+  # aws_s3_bucket_server_side_encryption_configuration.frontend will be created
 ```
 
 - **出現 `must be replaced` 或 `will be destroyed`**：第一次部署不應該有這兩種，代表 state 裡有你沒預期的東西，先停下來。
-- **出現 `data.aws_iam_policy_document.lambda will be read during apply`**：這是正常的。policy 要引用資料表的 ARN，而資料表還沒建立。
+- **出現 `data.aws_iam_policy_document.lambda will be read during apply`**：這是正常的。policy 要引用資料表的 ARN，而資料表還沒建立。`data.aws_iam_policy_document.frontend_bucket` 也一樣，它要引用 CloudFront distribution 的 ARN。
 
 想用表格方式看每個資源的動作，可以解析 plan 的 JSON（🧪）：
 
@@ -387,6 +394,8 @@ notepad "$env:TEMP\main-plan.txt"
 | DynamoDB On-Demand | 每次讀寫，加上儲存量 | 最多 22 筆資料，每筆約幾百 bytes |
 | CloudWatch Logs | 寫入量（GB），加上儲存量 | 保留 14 天；Logs Insights 依掃描量計費 |
 | S3（state bucket） | 儲存量和請求數 | state 只有幾 KB，舊版本保留 90 天 |
+| S3（前端 bucket） | 儲存量和請求數 | 打包結果約 250 KB；讀取都經過 CloudFront 快取 |
+| CloudFront | 流量和請求數 | 永久免費方案每月 1 TB 流量、1,000 萬次請求；每月前 1,000 個 invalidation 路徑免費 |
 | IAM、API 設定、log group 本身 | 免費 | |
 
 - **展示用的流量**：每天幾十到幾百次請求，預期每月遠低於 1 美元。這是估算，沒有實測過，也可能被你帳號的免費額度或 credits 抵掉。
@@ -402,7 +411,8 @@ terraform apply main.tfplan
 ```
 
 - **不會再問 yes**，會直接照 `main.tfplan` 執行。
-- **預期結果**：`Apply complete! Resources: 13 added, 0 changed, 0 destroyed.`（🧪），最後印出 output。
+- **預期結果**：`Apply complete! Resources: 19 added, 0 changed, 0 destroyed.`（🧪），最後印出 output。
+- **CloudFront 比較慢**：distribution 要部署到全球節點，`aws_cloudfront_distribution.frontend: Still creating...` 可能持續 3 到 10 分鐘，這是正常的。
 - **出現 `Saved plan is stale`**：代表 plan 之後 state 變過了。重新執行 `terraform plan "-out=main.tfplan"`，檢查後再 apply。
 - **中途失敗時**：已建立的資源都記在 state 裡。修正原因後重新 plan，這次只會列出還沒建立的部分，再 apply。不要到主控台手動刪除資源。
 - **IAM 尚未生效的錯誤**：IAM 剛建立的角色要過一下子才會在各服務生效，偶爾會看到 `The role defined for the function cannot be assumed by Lambda`。AWS provider 會自動重試；如果還是失敗，重新 plan 再 apply 即可。
@@ -723,8 +733,9 @@ terraform show -no-color destroy.tfplan | Select-String "will be destroyed" | Fo
 terraform apply destroy.tfplan
 ```
 
-- **plan 預期**：`Plan: 0 to add, 0 to change, 13 to destroy.`（🧪）。列出的 13 行應該正好是 4-1 那 13 個資源，而且都是 `will be destroyed`。
-- **apply 預期**：`Apply complete! Resources: 0 added, 0 changed, 13 destroyed.`（🧪）。
+- **plan 預期**：`Plan: 0 to add, 0 to change, 19 to destroy.`（🧪）。列出的 19 行應該正好是 4-1 那 19 個資源，而且都是 `will be destroyed`。
+- **CloudFront 要先停用才能刪除**：Terraform 會自動停用、等它部署完再刪除，這一步可能要 10 分鐘以上。前端 bucket 設了 `force_destroy`，裡面的檔案會一起刪除（都可以用 `npm run build` 重新產生）。
+- **apply 預期**：`Apply complete! Resources: 0 added, 0 changed, 19 destroyed.`（⏳：moto 無法停用 CloudFront，沒有模擬到最後）。
 - **為什麼不直接用 `terraform destroy`**：先用 `plan -destroy` 存成檔案、看過再執行，和建立時是同一個習慣。直接用 `terraform destroy` 也可以，它會列出要刪的資源，並要求你輸入 yes。
 
 確認已經刪除：
