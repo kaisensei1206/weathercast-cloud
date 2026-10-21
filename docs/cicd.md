@@ -132,6 +132,10 @@ GitHub 和 repo 裡都沒有任何 AWS 金鑰。repo 變數 `AWS_DEPLOY_ROLE_ARN
 | 讀取 | `apigateway:GET` | 這個 Region 的 `/apis/*` | 同上；API ID 是主 stack 建立時才產生，無法事先寫死 |
 | 讀取 | `s3:GetBucket*`、`ListBucket` 等 | `weathercast-frontend-<帳號 ID>` | plan 讀 bucket 設定；`aws s3 sync` 比對檔案 |
 | 讀取 | `cloudfront:GetDistribution`、`GetDistributionConfig`、`ListTagsForResource`、`GetOriginAccessControl` | 這個帳號的 distribution 和 OAC | plan 讀設定；ID 是主 stack 建立時才產生 |
+| 讀取 | `sns:GetTopicAttributes`、`ListTagsForResource` | `weathercast-alerts` topic | plan 讀告警的 SNS topic |
+| 讀取 | `cloudwatch:DescribeAlarms` | `*` | plan 讀告警；列表型 API，不一定支援指定單一告警 |
+| 讀取 | `cloudwatch:ListTagsForResource` | `weathercast-*` 告警 | 同上 |
+| 讀取 | `logs:DescribeMetricFilters` | Lambda 的 log group | plan 讀 log 轉指標的設定 |
 | **寫入** | `lambda:UpdateFunctionCode`、`UpdateFunctionConfiguration` | `weathercast-api` | 更新後端程式碼 |
 | **寫入** | `s3:PutObject`、`DeleteObject` | `weathercast-frontend-<帳號 ID>/*` | 上傳前端、刪除舊檔 |
 | **寫入** | `cloudfront:CreateInvalidation` | 這個帳號的 distribution | 部署後清除快取 |

@@ -32,14 +32,24 @@ def tf_text(stack: str) -> str:
     return "\n".join(p.read_text(encoding="utf-8") for p in files)
 
 
+def local_map_keys(text: str, name: str) -> list[str]:
+    """locals 裡 `name = { key = ... }` 的第一層 key；terraform fmt 固定用兩格縮排。"""
+    body = re.search(rf"^  {name} = \{{\n(.*?)^  \}}", text, re.MULTILINE | re.DOTALL)
+    return re.findall(r"^    ([\w-]+)\s+=", body.group(1), re.MULTILINE)
+
+
 def resource_addresses(stack: str) -> set[str]:
     """terraform plan 會列出的資源位址；for_each 的資源每個 key 各算一個。"""
+    text = tf_text(stack)
     addresses = set()
-    for kind, rtype, name, body in BLOCK.findall(tf_text(stack)):
+    for kind, rtype, name, body in BLOCK.findall(text):
         if kind != "resource":
             continue
-        for_each = re.search(r"for_each\s*=\s*toset\(\[(.*?)\]\)", body, re.DOTALL)
-        keys = re.findall(r'"([^"]+)"', for_each.group(1)) if for_each else []
+        keys = []
+        if for_each := re.search(r"for_each\s*=\s*toset\(\[(.*?)\]\)", body, re.DOTALL):
+            keys = re.findall(r'"([^"]+)"', for_each.group(1))
+        elif for_each := re.search(r"for_each\s*=\s*local\.(\w+)", body):
+            keys = local_map_keys(text, for_each.group(1))
         addresses |= {f'{rtype}.{name}["{k}"]' for k in keys} or {f"{rtype}.{name}"}
     return addresses
 

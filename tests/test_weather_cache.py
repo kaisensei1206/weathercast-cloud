@@ -88,11 +88,11 @@ def test_entry_freshness_boundaries():
 
 def test_missing_table_raises_cache_error(cache_table):
     # 資料表不存在、沒有權限這類錯誤，boto3 會丟出 ClientError
-    cache = WeatherCache(boto3.resource("dynamodb").Table("table-that-does-not-exist"))
+    table = boto3.resource("dynamodb").Table("table-that-does-not-exist")
     with pytest.raises(CacheError, match="get_item failed"):
-        cache.get("tainan")
+        WeatherCache(table).get("tainan")
     with pytest.raises(CacheError, match="put_item failed"):
-        cache.put("tainan", CURRENT, NOW)
+        WeatherCache(table).put("tainan", CURRENT, NOW)
 
 
 def test_timeout_raises_cache_error():
@@ -172,3 +172,91 @@ def test_cache_from_env_sets_short_dynamodb_timeouts(cache_table):
 def test_cache_from_env_rejects_bad_values(env):
     with pytest.raises(ValueError):
         cache_from_env({"CACHE_TABLE": TABLE_NAME, **env})
+
+
+# --- DynamoDB 故障時的保護 ----------------------------------------------------
+
+
+class FlakyTable:
+    """可以隨時切換成故障的資料表，並記錄被呼叫幾次。"""
+
+    def __init__(self, table):
+        self.table = table
+        self.broken = False
+        self.calls = 0
+
+    def get_item(self, **kwargs):
+        return self._call("get_item", kwargs)
+
+    def put_item(self, **kwargs):
+        return self._call("put_item", kwargs)
+
+    def _call(self, name, kwargs):
+        self.calls += 1
+        if self.broken:
+            raise ReadTimeoutError(endpoint_url="https://dynamodb.ap-northeast-1.amazonaws.com")
+        return getattr(self.table, name)(**kwargs)
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_get_falls_back_to_memory_when_dynamodb_fails(cache_table):
+    table = FlakyTable(cache_table)
+    cache = WeatherCache(table, monotonic=Clock())
+    cache.put("tainan", CURRENT, NOW)
+    table.broken = True
+
+    assert cache.get("tainan").current == CURRENT
+    with pytest.raises(CacheError):
+        cache.get("taipei")  # 記憶體裡也沒有，才丟出 CacheError
+
+
+def test_put_keeps_the_entry_in_memory_when_dynamodb_fails(cache_table):
+    table = FlakyTable(cache_table)
+    clock = Clock()
+    cache = WeatherCache(table, monotonic=clock)
+    table.broken = True
+    with pytest.raises(CacheError):
+        cache.put("tainan", CURRENT, NOW)
+
+    # DynamoDB 恢復了，但那筆資料當時沒寫進去：從記憶體補上
+    table.broken = False
+    clock.now += 60
+    assert cache.get("tainan").fetched_at == NOW
+
+
+def test_breaker_skips_dynamodb_for_a_while_after_a_failure(cache_table, capsys):
+    table = FlakyTable(cache_table)
+    clock = Clock()
+    cache = WeatherCache(table, breaker_seconds=30, monotonic=clock)
+    table.broken = True
+
+    with pytest.raises(CacheError, match="get_item failed"):
+        cache.get("tainan")
+    clock.now += 29
+    with pytest.raises(CacheError, match="skipped"):
+        cache.get("tainan")
+    assert table.calls == 1  # 第二次沒有真的呼叫 DynamoDB
+
+    table.broken = False
+    clock.now += 1
+    assert cache.get("tainan") is None
+    assert table.calls == 2
+    assert capsys.readouterr().out.count('"dynamodb_error"') == 1
+
+
+def test_corrupted_item_does_not_open_the_breaker(cache_table):
+    table = FlakyTable(cache_table)
+    cache = WeatherCache(table, monotonic=Clock())
+    cache_table.put_item(Item={"city_id": "tainan", "payload": "not json"})
+
+    for _ in range(2):
+        with pytest.raises(CacheError, match="invalid cache item"):
+            cache.get("tainan")
+    assert table.calls == 2

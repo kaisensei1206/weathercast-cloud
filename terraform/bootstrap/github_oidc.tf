@@ -149,6 +149,34 @@ data "aws_iam_policy_document" "github_deploy" {
     resources = ["${local.cloudfront_arn_prefix}:origin-access-control/*"]
   }
 
+  statement {
+    sid       = "ReadAlertsTopic"
+    actions   = ["sns:GetTopicAttributes", "sns:ListTagsForResource"]
+    resources = ["arn:aws:sns:${local.arn_prefix}:${var.project_name}-alerts"]
+  }
+
+  statement {
+    # DescribeAlarms 是列表型 API，不一定支援指定單一告警，所以和 DescribeLogGroups 一樣開放整個帳號；只能讀
+    sid       = "ListAlarms"
+    actions   = ["cloudwatch:DescribeAlarms"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadAlarmTags"
+    actions   = ["cloudwatch:ListTagsForResource"]
+    resources = ["arn:aws:cloudwatch:${local.arn_prefix}:alarm:${var.project_name}-*"]
+  }
+
+  statement {
+    sid     = "ReadMetricFilters"
+    actions = ["logs:DescribeMetricFilters"]
+    resources = [
+      "arn:aws:logs:${local.arn_prefix}:log-group:/aws/lambda/${var.project_name}-api",
+      "arn:aws:logs:${local.arn_prefix}:log-group:/aws/lambda/${var.project_name}-api:*",
+    ]
+  }
+
   # --- 前端部署：上傳、刪除舊檔，清除 CloudFront 快取 ---
   statement {
     sid       = "UploadFrontend"

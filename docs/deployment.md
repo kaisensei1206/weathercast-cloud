@@ -6,7 +6,7 @@
 - 所有資源都在 `ap-northeast-1`（東京）。
 - 每一步都標示了驗證狀態，說明見下一節。
 
-> **目前狀態：已部署（2026-10-19）。** 第 1 到 7 節已在真實 AWS 執行過一次（bootstrap 當時是 6 個資源，主 stack 13 個）。下方各節的 ⏳ 標示保留第七階段撰寫時的狀態。第八階段在 bootstrap 加了 GitHub Actions 用的 OIDC 與部署角色（+3 個資源），說明見 [cicd.md](cicd.md)。之後主 stack 加了前端的 S3 + CloudFront（+6 個資源，共 19 個），已經部署過的環境怎麼升級見 [frontend.md 第 5 節](frontend.md#5-部署到-s3--cloudfront)。再之後加了煙火活動路由 `GET /api/fireworks`（+1 個資源，共 20 個），升級步驟見 [fireworks.md](fireworks.md)。
+> **目前狀態：已部署（2026-10-19）。** 第 1 到 7 節已在真實 AWS 執行過一次（bootstrap 當時是 6 個資源，主 stack 13 個）。下方各節的 ⏳ 標示保留第七階段撰寫時的狀態。第八階段在 bootstrap 加了 GitHub Actions 用的 OIDC 與部署角色（+3 個資源），說明見 [cicd.md](cicd.md)。之後主 stack 加了前端的 S3 + CloudFront（+6 個資源，共 19 個），已經部署過的環境怎麼升級見 [frontend.md 第 5 節](frontend.md#5-部署到-s3--cloudfront)。再之後加了煙火活動路由 `GET /api/fireworks`（+1 個資源，共 20 個），升級步驟見 [fireworks.md](fireworks.md)。最後加了 CloudWatch 告警（+12 個資源，共 32 個），升級步驟見 [monitoring.md](monitoring.md)。
 
 ## 驗證狀態
 
@@ -23,10 +23,10 @@
 | `terraform fmt`、`terraform validate` | ✅ | 你的電腦（Terraform 1.16.5）和沙盒都通過 |
 | 本機工具版本 | ✅ | 你的電腦：Terraform 1.16.5、AWS CLI 2.38.1、Python 3.12.3 |
 | bootstrap 的 plan | 🧪 | `Plan: 9 to add, 0 to change, 0 to destroy.`（第七階段的 6 個 S3 資源已在真實 AWS 建立 ✅；第八階段加的 3 個 IAM 資源只在沙盒驗證過） |
-| 主 stack 用 S3 backend 初始化與 plan | 🧪 | `Plan: 20 to add, 0 to change, 0 to destroy.`（13 個後端資源已在真實 AWS 建立 ✅；前端的 6 個和煙火路由只在沙盒驗證過） |
-| apply、讀取 output、再 plan 一次 | 🧪 | `20 added`；只有後端資源時，第二次 plan 顯示 `No changes`（前端見下方 moto 的限制） |
+| 主 stack 用 S3 backend 初始化與 plan | 🧪 | `Plan: 32 to add, 0 to change, 0 to destroy.`（13 個後端資源已在真實 AWS 建立 ✅；前端的 6 個和煙火路由之後也已上線；告警的 12 個只在沙盒驗證過） |
+| apply、讀取 output、再 plan 一次 | 🧪 | `32 added`；只有後端資源時，第二次 plan 顯示 `No changes`（前端見下方 moto 的限制） |
 | 只改程式碼時的 plan | 🧪 | `Plan: 0 to add, 1 to change, 0 to destroy.`，變更的是 `source_code_hash` |
-| plan -destroy、destroy、bootstrap 防刪 | 🧪 | 只有後端時 `13 to destroy`、`13 destroyed`；加上前端後 plan 是 `20 to destroy`，但 moto 無法停用 CloudFront，destroy 沒有跑完。bootstrap 回 `Instance cannot be destroyed` |
+| plan -destroy、destroy、bootstrap 防刪 | 🧪 | 只有後端時 `13 to destroy`、`13 destroyed`；加上前端和告警後 plan 是 `32 to destroy`，但 moto 無法停用 CloudFront，destroy 沒有跑完。bootstrap 回 `Instance cannot be destroyed` |
 | 手冊裡的 AWS CLI 查詢指令 | 🧪 | 用 AWS CLI 2.38.1（和你電腦同版）對 moto 執行，輸出格式符合手冊 |
 | 直接呼叫 Lambda 用的事件檔 | ✅ | 用 PowerShell 產生 JSON 檔，交給本機 handler 執行，`/api/health` 回 200 |
 | AWS 帳號設定、SSO 登入、真實的 plan 與 apply、線上測試、CloudWatch、費用、清除 | ⏳ | 需要你的 AWS 帳號 |
@@ -222,6 +222,10 @@ aws configure get region               # 應該是 ap-northeast-1
 | `cache_retain_seconds` | `86400` | 快取保留期，也是 TTL |
 | `api_throttle_rate_limit` | `10` | 每秒平均請求上限 |
 | `api_throttle_burst_limit` | `20` | 瞬間請求上限 |
+| `fireworks_throttle_rate_limit` | `2` | `/api/fireworks` 每秒平均請求上限，比其他路由低 |
+| `fireworks_throttle_burst_limit` | `5` | `/api/fireworks` 瞬間請求上限 |
+| `alarm_requests_per_5min` | `1500` | 請求量突增告警的門檻（5 分鐘） |
+| `alarm_5xx_per_5min` | `5` | 5xx 告警的門檻（5 分鐘） |
 | `cors_allow_origins` | `["http://localhost:5173"]` | 允許跨網域呼叫的來源 |
 
 如果只想暫時改一個值，可以在 plan 時加參數，例如 `terraform plan "-var=log_retention_days=7" "-out=main.tfplan"`，但每次 plan 都要帶。要長期修改，請直接改 `variables.tf` 的預設值並發 PR。`*.tfvars` 被 `.gitignore` 排除，其他電腦和 CI 都看不到。
@@ -307,7 +311,7 @@ terraform plan "-out=main.tfplan"
 | `init` | `Successfully configured the backend "s3"!` 和 `Terraform has been successfully initialized!`（🧪） |
 | `fmt -check` | 沒有輸出。如果列出檔名，執行 `terraform fmt -recursive ..`，修正後再 commit |
 | `validate` | `Success! The configuration is valid.`（✅） |
-| `plan` | `Plan: 20 to add, 0 to change, 0 to destroy.`（🧪），同時產生 `build\lambda.zip` |
+| `plan` | `Plan: 32 to add, 0 to change, 0 to destroy.`（🧪），同時產生 `build\lambda.zip` |
 
 - **為什麼 init 要帶 bucket？** 因為 backend 的 bucket 名稱含帳號 ID，沒有寫死在程式碼裡，要在 init 時用 `-backend-config` 帶入。
 - **init 問要不要複製 state？** 如果出現 `Do you want to copy existing state to the new backend?`，代表 `terraform\main` 裡有舊的本機 state。先停下來確認，正常情況不會出現這個問題。
@@ -320,7 +324,7 @@ terraform plan "-out=main.tfplan"
 terraform show -no-color main.tfplan | Select-String "will be created|will be updated|must be replaced|will be destroyed" | ForEach-Object Line
 ```
 
-第一次部署時，預期有 20 行，而且全部是 `will be created`（🧪）。其中 14 個是後端，`cloudfront` 和 `s3_bucket` 開頭的 6 個是前端：
+第一次部署時，預期有 32 行，而且全部是 `will be created`（🧪）。其中 14 個是後端，`cloudfront` 和 `s3_bucket` 開頭的 6 個是前端，`aws_sns_topic`、`aws_cloudwatch_log_metric_filter` 和 `aws_cloudwatch_metric_alarm` 開頭的 12 個是告警（見 [monitoring.md](monitoring.md)）：
 
 ```text
   # aws_apigatewayv2_api.http will be created
@@ -334,6 +338,17 @@ terraform show -no-color main.tfplan | Select-String "will be created|will be up
   # aws_cloudfront_origin_access_control.frontend will be created
   # aws_cloudwatch_log_group.api_access will be created
   # aws_cloudwatch_log_group.lambda will be created
+  # aws_cloudwatch_log_metric_filter.app["CacheHits"] will be created
+  # aws_cloudwatch_log_metric_filter.app["CacheMisses"] will be created
+  # aws_cloudwatch_log_metric_filter.app["DynamoDBErrors"] will be created
+  # aws_cloudwatch_log_metric_filter.app["UpstreamFailures"] will be created
+  # aws_cloudwatch_metric_alarm.alarms["api-5xx"] will be created
+  # aws_cloudwatch_metric_alarm.alarms["api-traffic-spike"] will be created
+  # aws_cloudwatch_metric_alarm.alarms["dynamodb-errors"] will be created
+  # aws_cloudwatch_metric_alarm.alarms["lambda-duration"] will be created
+  # aws_cloudwatch_metric_alarm.alarms["lambda-errors"] will be created
+  # aws_cloudwatch_metric_alarm.alarms["lambda-throttles"] will be created
+  # aws_cloudwatch_metric_alarm.alarms["upstream-failures"] will be created
   # aws_dynamodb_table.cache will be created
   # aws_iam_role.lambda will be created
   # aws_iam_role_policy.lambda will be created
@@ -343,6 +358,7 @@ terraform show -no-color main.tfplan | Select-String "will be created|will be up
   # aws_s3_bucket_policy.frontend will be created
   # aws_s3_bucket_public_access_block.frontend will be created
   # aws_s3_bucket_server_side_encryption_configuration.frontend will be created
+  # aws_sns_topic.alerts will be created
 ```
 
 - **出現 `must be replaced` 或 `will be destroyed`**：第一次部署不應該有這兩種，代表 state 裡有你沒預期的東西，先停下來。
@@ -381,6 +397,8 @@ notepad "$env:TEMP\main-plan.txt"
 | | `hash_key` / TTL `attribute_name` | `city_id` / `expires_at` | 和程式讀寫的欄位一致 |
 | 兩個 `aws_cloudwatch_log_group` | `retention_in_days` | `14` | 不設定的話 log 會永久保存並持續收費 |
 | `aws_apigatewayv2_stage.default` | `throttling_rate_limit` / `throttling_burst_limit` | `10` / `20` | 費用上限的防線，超過的請求直接回 429 |
+| | `route_settings`（`GET /api/fireworks`） | `2` / `5` | 回應最大的路由另外調低 |
+| `aws_cloudwatch_metric_alarm.alarms` | `alarm_actions` / `ok_actions` | 都是告警的 SNS topic | 沒設定的話告警觸發了也沒人知道 |
 | `aws_apigatewayv2_api.http` | `allow_origins` | 只有 `http://localhost:5173` | 沒有開放 `*` |
 | `aws_iam_role_policy.lambda` | `policy` | `(known after apply)` | 內容要等資料表建立後才知道。請直接看 `terraform/main/iam.tf`；apply 之後再用 9-2 的指令確認 |
 
@@ -397,11 +415,13 @@ notepad "$env:TEMP\main-plan.txt"
 | S3（state bucket） | 儲存量和請求數 | state 只有幾 KB，舊版本保留 90 天 |
 | S3（前端 bucket） | 儲存量和請求數 | 打包結果約 250 KB；讀取都經過 CloudFront 快取 |
 | CloudFront | 流量和請求數 | 永久免費方案每月 1 TB 流量、1,000 萬次請求；每月前 1,000 個 invalidation 路徑免費 |
-| IAM、API 設定、log group 本身 | 免費 | |
+| CloudWatch 告警 | 每個告警每月 | 7 個標準告警，在每月 10 個的免費額度內 |
+| SNS（告警 email） | 每則通知 | 每月前 1,000 封 email 免費 |
+| IAM、API 設定、log group、metric filter 本身 | 免費 | log 轉成的自訂指標每個月有 10 個免費 |
 
 - **展示用的流量**：每天幾十到幾百次請求，預期每月遠低於 1 美元。這是估算，沒有實測過，也可能被你帳號的免費額度或 credits 抵掉。
 - **最壞情況**：有人一直打到節流上限，每秒 10 次。一個月最多約 2,600 萬次請求（10 × 86,400 × 30），費用粗估在數十美元等級。實際金額請用 [AWS Pricing Calculator](https://calculator.aws/) 依這個請求量估算。
-- **防線**：1-3 建立的預算提醒會在超過金額時寄信。想把上限壓得更低，可以把 `api_throttle_rate_limit` 調小。
+- **防線**：1-3 建立的預算提醒會在超過金額時寄信；請求量突增告警會在 5 分鐘超過 1,500 次請求時寄信（[monitoring.md](monitoring.md)）。想把上限壓得更低，可以把 `api_throttle_rate_limit` 調小。
 
 ## 5. 建立 AWS 資源 ⏳
 
@@ -412,7 +432,7 @@ terraform apply main.tfplan
 ```
 
 - **不會再問 yes**，會直接照 `main.tfplan` 執行。
-- **預期結果**：`Apply complete! Resources: 20 added, 0 changed, 0 destroyed.`（🧪），最後印出 output。
+- **預期結果**：`Apply complete! Resources: 32 added, 0 changed, 0 destroyed.`（🧪），最後印出 output。之後照 [monitoring.md](monitoring.md) 加上告警的 email 訂閱。
 - **CloudFront 比較慢**：distribution 要部署到全球節點，`aws_cloudfront_distribution.frontend: Still creating...` 可能持續 3 到 10 分鐘，這是正常的。
 - **出現 `Saved plan is stale`**：代表 plan 之後 state 變過了。重新執行 `terraform plan "-out=main.tfplan"`，檢查後再 apply。
 - **中途失敗時**：已建立的資源都記在 state 裡。修正原因後重新 plan，這次只會列出還沒建立的部分，再 apply。不要到主控台手動刪除資源。
@@ -734,9 +754,9 @@ terraform show -no-color destroy.tfplan | Select-String "will be destroyed" | Fo
 terraform apply destroy.tfplan
 ```
 
-- **plan 預期**：`Plan: 0 to add, 0 to change, 20 to destroy.`（🧪）。列出的 20 行應該正好是 4-1 那 20 個資源，而且都是 `will be destroyed`。
+- **plan 預期**：`Plan: 0 to add, 0 to change, 32 to destroy.`（🧪）。列出的 32 行應該正好是 4-1 那 32 個資源，而且都是 `will be destroyed`。
 - **CloudFront 要先停用才能刪除**：Terraform 會自動停用、等它部署完再刪除，這一步可能要 10 分鐘以上。前端 bucket 設了 `force_destroy`，裡面的檔案會一起刪除（都可以用 `npm run build` 重新產生）。
-- **apply 預期**：`Apply complete! Resources: 0 added, 0 changed, 20 destroyed.`（⏳：moto 無法停用 CloudFront，沒有模擬到最後）。
+- **apply 預期**：`Apply complete! Resources: 0 added, 0 changed, 32 destroyed.`（⏳：moto 無法停用 CloudFront，沒有模擬到最後）。
 - **為什麼不直接用 `terraform destroy`**：先用 `plan -destroy` 存成檔案、看過再執行，和建立時是同一個習慣。直接用 `terraform destroy` 也可以，它會列出要刪的資源，並要求你輸入 yes。
 
 確認已經刪除：

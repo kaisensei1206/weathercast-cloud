@@ -55,7 +55,7 @@ Open-Meteo 失敗時，如果快取裡有 24 小時內的資料，會回 200 和
 
 ## 快取
 
-每個城市在 DynamoDB 存一筆資料，10 分鐘內的查詢直接回傳快取，不呼叫 Open-Meteo。煙火活動也存在同一張表（key 是 `fireworks:tourism`），規則相同。資料表設計、TTL 與故障處理見 [docs/cache.md](docs/cache.md)。
+每個城市在 DynamoDB 存一筆資料，10 分鐘內的查詢直接回傳快取，不呼叫 Open-Meteo。煙火活動也存在同一張表（key 是 `fireworks:tourism`），規則相同。DynamoDB 故障時，服務改用 Lambda 記憶體裡的備份，並在 30 秒內跳過 DynamoDB，避免每個請求都打到外部 API。資料表設計、TTL 與故障處理見 [docs/cache.md](docs/cache.md)。
 
 ```mermaid
 flowchart LR
@@ -93,7 +93,8 @@ flowchart LR
   L <--> DDB[(DynamoDB<br/>天氣與煙火快取)]
   L --> OM[Open-Meteo]
   L --> TW[交通部觀光署 活動資料]
-  L -.-> CW[CloudWatch Logs]
+  L -.-> CW[CloudWatch Logs<br/>與告警]
+  CW -. email .-> SNS[SNS]
   GA[GitHub Actions] -- "OIDC：只更新 Lambda、上傳前端" --> TF[Terraform]
   PC[本機] -- "基礎設施變更：看過 plan 再 apply" --> TF
   TF -.-> CF & APIGW & L & DDB & S3
@@ -103,13 +104,13 @@ flowchart LR
 |---|---|
 | CloudFront | 唯一的對外網域：`/*` 給 S3 的前端，`/api/*` 給 API Gateway；前後端同網域，線上不需要 CORS |
 | S3 | 前端靜態檔；bucket 私有，只有 CloudFront 透過 OAC 能讀 |
-| API Gateway HTTP API | 4 條路由、節流（每秒 10 次、瞬間 20 次） |
+| API Gateway HTTP API | 4 條路由、節流（每秒 10 次、瞬間 20 次；`/api/fireworks` 每秒 2 次、瞬間 5 次） |
 | Lambda（Python 3.12） | 輸入驗證、查快取、呼叫外部資料來源、整理回應 |
 | Open-Meteo | 第三方氣象資料（免 API key） |
 | 交通部觀光署 | 活動開放資料（免 API key，每天更新），從中挑出煙火活動 |
 | DynamoDB | 快取查詢結果，TTL 自動清除舊資料 |
 | OpenStreetMap | 前端地圖的圖磚，瀏覽器直接下載，不經過我們的服務 |
-| CloudWatch | Lambda 與 API Gateway 的執行紀錄（還沒設告警） |
+| CloudWatch + SNS | Lambda 與 API Gateway 的執行紀錄；7 個告警（Lambda 錯誤、節流、執行時間、5xx、流量突增、上游失敗、DynamoDB 錯誤）出事時寄 email |
 | Terraform | 建立與更新所有 AWS 資源，分 bootstrap 和 main 兩個 stack |
 | GitHub Actions | PR 時執行測試；合併到 main 後只自動更新 Lambda 程式碼和前端，其他基礎設施變更由人在本機 apply |
 
@@ -153,7 +154,7 @@ python scripts/invoke_local.py /api/weather                # 400
 
 ## 基礎設施
 
-所有 AWS 資源都在 `terraform/` 用 Terraform 管理：Lambda（Python 3.12、arm64）、API Gateway HTTP API、DynamoDB、IAM、CloudWatch Logs、S3、CloudFront。資源說明、依賴關係，以及 Terraform 和 CI/CD 如何分工，見 [docs/infrastructure.md](docs/infrastructure.md)。
+所有 AWS 資源都在 `terraform/` 用 Terraform 管理：Lambda（Python 3.12、arm64）、API Gateway HTTP API、DynamoDB、IAM、CloudWatch Logs 與告警、SNS、S3、CloudFront。資源說明、依賴關係，以及 Terraform 和 CI/CD 如何分工，見 [docs/infrastructure.md](docs/infrastructure.md)。
 
 不需要 AWS 帳號也能做的檢查：
 
@@ -179,6 +180,10 @@ npm run build
 
 結構、設計決策、測試，以及部署到 S3 + CloudFront（私有 bucket + OAC，`/api/*` 轉給 API Gateway）的方式，見 [docs/frontend.md](docs/frontend.md)。
 
+## 監控與流量限制
+
+API 是公開的，所以用三層控制費用和風險：API Gateway 節流（全部路由每秒 10 次，回應最大的 `/api/fireworks` 每秒 2 次）、5 分鐘超過 1,500 次請求就寄信的流量突增告警，以及每月 5 美元的 AWS Budget。另外有 7 個 CloudWatch 告警透過 SNS 寄 email。評估過但沒採用 WAF 和 API Key 的原因、每個告警門檻的理由，見 [docs/monitoring.md](docs/monitoring.md)。
+
 ## 部署
 
 從建立 AWS 帳號權限、Terraform plan 與 apply、線上測試、查看 CloudWatch Logs、排除錯誤，到清除資源的完整步驟，見 [docs/deployment.md](docs/deployment.md)。
@@ -199,4 +204,4 @@ npm run build
 - [x] 前端部署：S3 + CloudFront（見 docs/frontend.md 第 5 節）
 - [x] 煙火活動地圖（`/api/fireworks`，見 docs/fireworks.md）
 - [x] 地圖改成整頁背景，天氣特效疊在地圖上
-- [ ] CloudWatch 告警
+- [x] CloudWatch 告警、依路由節流、快取故障時保護上游（見 docs/monitoring.md）
