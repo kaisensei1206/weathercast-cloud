@@ -2,7 +2,7 @@
 -r requirements.txt
 pytest==9.0.3
 pytest-cov==6.1.1
-moto[dynamodb]==5.1.4
+moto[dynamodb]==5.2.4
 boto3==1.38.8
 ruff==0.11.8
 pyyaml==6.0.2
