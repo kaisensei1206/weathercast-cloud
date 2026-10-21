@@ -1,0 +1,22 @@
+# 每週檢查相依套件與 GitHub Actions 的新版本，發 PR 更新。
+# workflow 裡的 action 釘在 commit SHA，Dependabot 會連同後面的版本註解一起更新。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      # 開發工具（vite、vitest、testing-library……）合成一個 PR，避免一次湧進很多 PR
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly

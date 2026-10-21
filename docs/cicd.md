@@ -5,7 +5,7 @@ workflow 在 [`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml)，�
 | Job | 什麼時候跑 | 做什麼 | AWS 權限 |
 |---|---|---|---|
 | `test` | 每個 PR、每次 push 到 main | ruff、pytest、`terraform fmt`、`terraform validate` | 沒有 |
-| `frontend` | 每個 PR、每次 push 到 main | `npm ci`、`npm test`、`npm run build` | 沒有 |
+| `frontend` | 每個 PR、每次 push 到 main | `npm ci`、`npm test`、`npm run build`；main 上把 `dist` 存成 artifact 給 `deploy` 用 | 沒有 |
 | `deploy` | push 到 main（合併 PR）或手動觸發，而且 `test`、`frontend` 都通過 | OIDC 登入 AWS → plan → 檢查 plan → apply → 上傳前端 → 清除 CloudFront 快取 → 冒煙測試 | 只能更新既有的 Lambda、上傳到既有的前端 bucket、清除快取 |
 
 ```
@@ -48,7 +48,7 @@ main ─► test + frontend ──► deploy: OIDC 換臨時憑證 ─► terraf
 | Check plan only updates Lambda | `scripts/check_plan.py` 讀 `terraform show -json` 的結果，只允許「沒有變更」或「`aws_lambda_function.api` update」，其他變更一律停止 |
 | Terraform apply | 套用剛剛檢查過的那份 plan 檔，不會重新計算 |
 | Read Terraform outputs | 讀出 API 網址、前端網址、bucket 名稱和 distribution ID，給後面的步驟用 |
-| Build frontend | `npm ci && npm run build`，不設定 `VITE_API_BASE_URL`，前端用相對路徑 `/api` |
+| Download frontend build | 下載 `frontend` job 建好的 `dist`（不設定 `VITE_API_BASE_URL`，前端用相對路徑 `/api`）。`deploy` 有 AWS 憑證，所以不在這裡執行 npm：套件的程式碼只在沒有 AWS 權限的 `frontend` job 執行 |
 | Upload frontend to S3 | 先傳 `assets/`（永久快取），再傳 `index.html` 等其他檔案（`no-cache`），見 [frontend.md](frontend.md) 第 5 節 |
 | Invalidate CloudFront cache | 清除 `/` 和 `/index.html` 的快取 |
 | Smoke test | `scripts/smoke_test.py` 打 `/api/health` 和 `/api/weather?city=Tainan`，檢查狀態碼和內容；再對 CloudFront 網址加上 `--frontend` 跑一次，多檢查首頁。失敗會每 3 秒重試，最多 5 次 |
@@ -247,4 +247,4 @@ GitHub 免費方案的私人 repo 不能設定 branch protection 和 Environment
 - 沒有使用 GitHub Environment（需要人工核准的部署）：免費方案的私人 repo 不支援。repo 公開後，可以建立 `production` Environment、設定 required reviewers，並把信任政策的 `sub` 改成 `repo:kaisensei1206@134856648/weathercast-cloud@1421996870:environment:production`。
 - 冒煙測試只打兩個端點，確認服務活著、能回傳台南的天氣，不是完整的整合測試。
 - 冒煙測試失敗時不會自動回滾，需要人決定是修正後重新部署，還是 revert 那次合併。
-- 第三方 action 用版本 tag（`@v5`），沒有釘到 commit SHA。要更嚴格可以改用 SHA，並用 Dependabot 更新。
+- action 都釘在 commit SHA（版本寫在註解），由 Dependabot（`.github/dependabot.yml`）每週發 PR 更新；`tests/test_ci_cd.py` 會擋下沒有釘 SHA 的 action，以及在有 AWS 憑證的 job 裡執行 npm。

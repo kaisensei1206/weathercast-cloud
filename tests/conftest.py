@@ -18,8 +18,10 @@ import pytest
 from moto import mock_aws
 
 import fireworks_client
+import fireworks_service
 import handler
 import weather_client
+import weather_service
 from fakes import SAMPLE_EVENT, TABLE_NAME, FakeUpstream, event_list, tourism_zip
 
 
@@ -43,6 +45,13 @@ def isolate_aws(monkeypatch):
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-northeast-1")
     monkeypatch.setattr(handler, "CACHE", None)
+
+
+@pytest.fixture(autouse=True)
+def reset_upstream_backoff():
+    """上游退避是模組層級的狀態；每個測試都從「上游正常」開始，不受前一個測試的失敗影響。"""
+    weather_service.BACKOFF.reset()
+    fireworks_service.BACKOFF.reset()
 
 
 @pytest.fixture

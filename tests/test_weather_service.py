@@ -12,7 +12,7 @@ from moto import mock_aws
 
 from fakes import SAMPLE_CURRENT
 from weather_cache import CacheError, WeatherCache
-from weather_client import UpstreamError, UpstreamTimeout
+from weather_client import UpstreamBackoff, UpstreamError, UpstreamTimeout
 from weather_service import (
     MAX_CITY_LENGTH,
     CityNotFound,
@@ -267,3 +267,20 @@ def test_dynamodb_outage_does_not_send_every_request_upstream(capsys):
 def test_invalid_input_never_touches_cache(bad_query):
     with pytest.raises((MissingCity, InvalidCity, CityNotFound)):
         get_weather(bad_query, fetcher=must_not_fetch, cache=UntouchableCache())
+
+
+def test_failing_upstream_is_not_retried_on_every_request(cache):
+    # 上游故障時，第一次失敗後的 30 秒內直接回舊資料，不再每個請求都等一次逾時
+    query(cache, Upstream(), NOW)
+    failing = Upstream(exc=UpstreamTimeout("read timeout"))
+    backoff = UpstreamBackoff()
+
+    results = [
+        get_weather(
+            "Tainan", fetcher=failing, clock=lambda: NOW + 3600, cache=cache, backoff=backoff
+        )
+        for _ in range(20)
+    ]
+
+    assert failing.calls == 1
+    assert all(r["meta"]["stale"] for r in results)

@@ -12,13 +12,14 @@ import urllib.request
 import zipfile
 from datetime import datetime
 
-from weather_client import UpstreamError, UpstreamTimeout
+from weather_client import UpstreamError, UpstreamTimeout, call_with_deadline
 
 EVENTS_URL = "https://media.taiwan.net.tw/XMLReleaseAll_public/v2.0/Zh_tw/Event-json.zip"
 EVENTS_FILE = "EventList.json"
 
 # zip 約 0.5 MB，比 Open-Meteo 的回應大很多，給 5 秒。
-# 最壞情況：讀 DynamoDB 1 秒 + 下載 5 秒 + 寫 DynamoDB 1 秒，仍在 Lambda 的 10 秒逾時內。
+# timeout 是每次連線或讀取的上限；整個下載的總時間另外用 call_with_deadline 限制在同樣的 5 秒。
+# 最壞情況：讀 DynamoDB 2 秒 + 下載 5 秒 + 寫 DynamoDB 2 秒，仍在 Lambda 的 10 秒逾時內。
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
 # 外部檔案不可全信：下載和解壓縮後的大小都設上限，避免異常的大檔或 zip bomb 吃光 Lambda 記憶體。
@@ -29,11 +30,21 @@ MAX_JSON_BYTES = 50 * 1024 * 1024
 KEYWORDS = ("煙火", "烟火", "花火", "焰火")
 
 
-def fetch_events(timeout: float = DEFAULT_TIMEOUT_SECONDS) -> list[dict]:
+def fetch_events(
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    deadline: float = DEFAULT_TIMEOUT_SECONDS,
+) -> list[dict]:
     """下載活動資料，回傳整理好的煙火相關活動；連線或格式問題都轉成 UpstreamError。"""
+    body = call_with_deadline(lambda: _download(timeout), deadline, "tourism")
+    if len(body) > MAX_ZIP_BYTES:
+        raise UpstreamError("tourism zip is too large")
+    return parse_events(read_event_list(body))
+
+
+def _download(timeout: float) -> bytes:
     try:
         with urllib.request.urlopen(EVENTS_URL, timeout=timeout) as resp:
-            body = resp.read(MAX_ZIP_BYTES + 1)
+            return resp.read(MAX_ZIP_BYTES + 1)
     except urllib.error.HTTPError as exc:
         raise UpstreamError(f"tourism HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
@@ -44,10 +55,6 @@ def fetch_events(timeout: float = DEFAULT_TIMEOUT_SECONDS) -> list[dict]:
         raise UpstreamTimeout("tourism read timeout") from exc
     except (OSError, http.client.HTTPException) as exc:
         raise UpstreamError(f"tourism connection failed: {exc!r}") from exc
-
-    if len(body) > MAX_ZIP_BYTES:
-        raise UpstreamError("tourism zip is too large")
-    return parse_events(read_event_list(body))
 
 
 def read_event_list(body: bytes) -> object:

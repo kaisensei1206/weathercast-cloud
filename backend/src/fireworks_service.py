@@ -12,9 +12,11 @@ from datetime import datetime, timedelta, timezone
 from fireworks_client import fetch_events
 from logger import log
 from weather_cache import CacheError, WeatherCache
-from weather_client import UpstreamError
+from weather_client import UpstreamBackoff, UpstreamError
 
 CACHE_KEY = "fireworks:tourism"
+# 觀光署失敗後暫停下載一段時間，和天氣的 BACKOFF 分開計算
+BACKOFF = UpstreamBackoff()
 # 臺灣沒有日光節約時間，固定 UTC+8；不用 zoneinfo，就不必依賴執行環境的時區資料庫
 TAIPEI = timezone(timedelta(hours=8))
 
@@ -45,6 +47,7 @@ def get_fireworks(
     fetcher: Callable[[], list[dict]] = fetch_events,
     clock: Callable[[], float] = time.time,
     cache: WeatherCache | None = None,
+    backoff: UpstreamBackoff = BACKOFF,
 ) -> dict:
     now = clock()
     year, now = this_year(now), int(now)
@@ -62,7 +65,7 @@ def get_fireworks(
         return build_response(cached.current["events"], year, cached.fetched_at, "cache", False)
 
     try:
-        events = fetcher()
+        events = backoff.call(fetcher)
     except UpstreamError as exc:
         if cached is None:
             raise

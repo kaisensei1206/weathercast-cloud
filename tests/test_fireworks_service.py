@@ -6,7 +6,7 @@ import pytest
 
 from fireworks_service import CACHE_KEY, get_fireworks, in_year, this_year
 from weather_cache import CacheError, WeatherCache
-from weather_client import UpstreamError
+from weather_client import UpstreamBackoff, UpstreamError
 
 TAIPEI = timezone(timedelta(hours=8))
 NOW = datetime(2026, 10, 21, 17, 0, tzinfo=TAIPEI).timestamp()
@@ -118,3 +118,21 @@ def test_cache_failure_falls_back_to_tourism(capsys):
     assert result["meta"]["source"] == "upstream"
     out = capsys.readouterr().out
     assert "cache_read_failed" in out and "cache_write_failed" in out
+
+
+def test_failing_tourism_is_not_retried_on_every_request(cache_table):
+    cache = WeatherCache(cache_table)
+    get_fireworks(fetcher, clock=lambda: NOW, cache=cache)
+    calls = []
+
+    def counting_failure():
+        calls.append(1)
+        failing()
+
+    backoff = UpstreamBackoff()
+    for _ in range(10):
+        result = get_fireworks(
+            counting_failure, clock=lambda: NOW + 3600, cache=cache, backoff=backoff
+        )
+        assert result["meta"]["stale"] is True
+    assert len(calls) == 1
