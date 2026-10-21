@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiUrl, fetchCities, fetchWeather } from './weatherApi.js'
-import { CITIES, TAINAN, jsonResponse } from '../test/fixtures.js'
+import { ApiError, apiUrl, fetchCities, fetchFireworks, fetchWeather } from './weatherApi.js'
+import { CITIES, FIREWORKS, TAINAN, jsonResponse } from '../test/fixtures.js'
 
 let fetchMock
 
@@ -117,5 +117,27 @@ describe('fetchCities', () => {
     fetchMock.mockResolvedValue(jsonResponse(200, {}))
 
     await expect(fetchCities()).resolves.toEqual([])
+  })
+})
+
+describe('fetchFireworks', () => {
+  it('returns year, events and meta', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, FIREWORKS))
+
+    await expect(fetchFireworks()).resolves.toEqual(FIREWORKS)
+    expect(fetchMock.mock.calls[0][0]).toBe(apiUrl('/api/fireworks'))
+  })
+
+  it('fills in missing lists so the map never crashes', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { year: 2026 }))
+
+    await expect(fetchFireworks()).resolves.toEqual({ year: 2026, events: [], meta: {} })
+  })
+
+  it('reports an upstream failure as a server error', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(502, { error: 'upstream_error', message: 'x' }))
+
+    const error = await errorOf(fetchFireworks())
+    expect(error).toMatchObject({ kind: 'server', status: 502, code: 'upstream_error' })
   })
 })

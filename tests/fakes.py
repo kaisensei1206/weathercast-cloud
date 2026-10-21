@@ -2,6 +2,7 @@
 
 import io
 import json
+import zipfile
 
 # moto 模擬的 DynamoDB 資料表名稱
 TABLE_NAME = "weathercast-cache-test"
@@ -17,6 +18,39 @@ SAMPLE_CURRENT = {
     "wind_speed_10m": 8.7,
     "weather_code": 1,
 }
+
+
+# 觀光署 EventList.json 的一筆活動，欄位和 2026-10-21 下載的真實資料相同（說明文字縮短）
+SAMPLE_EVENT = {
+    "EventID": "Event_376540000A_006236",
+    "EventName": "2026成功鎮花火之夜",
+    "Description": "除夕夜，海風輕拂，煙花在夜空中璀璨綻放。",
+    "PositionLat": 23.10404,
+    "PositionLon": 121.38497,
+    "PostalAddress": {"City": "臺東縣", "Town": "成功鎮", "StreetAddress": "海濱公園"},
+    "Images": [
+        {"Name": "2026成功鎮花火之夜", "URL": "https://tour.taitung.gov.tw/image/54819/640x480"}
+    ],
+    "Organizations": [],
+    "WebsiteURL": "",
+    "StartDateTime": "2026-02-16T21:00:00+08:00",
+    "EndDateTime": "2026-02-16T23:59:59+08:00",
+    "EventStatus": "EventScheduled",
+}
+
+
+def event_list(*events: dict) -> dict:
+    return {"UpdateTime": "2026-10-21T14:30:00+08:00", "Language": "zh-tw", "Events": list(events)}
+
+
+def tourism_zip(data, name: str = "EventList.json") -> bytes:
+    """組出和觀光署相同結構的 zip；JSON 前面加 BOM，和真實檔案一樣。"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        content = data if isinstance(data, bytes) else json.dumps(data, ensure_ascii=False).encode()
+        archive.writestr(name, b"\xef\xbb\xbf" + content)
+        archive.writestr("manifest.csv", "file,count\n")
+    return buffer.getvalue()
 
 
 class FakeUpstream:
