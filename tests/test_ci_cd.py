@@ -18,6 +18,7 @@ import smoke_test
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = yaml.safe_load((ROOT / ".github" / "workflows" / "ci-cd.yml").read_text("utf-8"))
 OIDC_TF = (ROOT / "terraform" / "bootstrap" / "github_oidc.tf").read_text("utf-8")
+FRONTEND_TF = (ROOT / "terraform" / "main" / "frontend.tf").read_text("utf-8")
 
 
 # --- check_plan：只允許更新 Lambda ---------------------------------------------
@@ -126,11 +127,49 @@ def test_smoke_test_fails_after_all_attempts(url, response, message):
 
 
 def test_smoke_test_main_exit_codes(monkeypatch, capsys):
-    monkeypatch.setattr(smoke_test, "run", lambda base: [])
+    calls = []
+    monkeypatch.setattr(smoke_test, "run", lambda base, frontend: calls.append(frontend) or [])
     assert smoke_test.main(["smoke_test.py", BASE]) == 0
-    monkeypatch.setattr(smoke_test, "run", lambda base: ["/api/health returned 500 {}"])
+    assert smoke_test.main(["smoke_test.py", BASE, "--frontend"]) == 0
+    assert calls == [False, True]
+    assert "Smoke test passed: /, /api/health" in capsys.readouterr().out
+    monkeypatch.setattr(smoke_test, "run", lambda base, frontend: ["/api/health returned 500 {}"])
     assert smoke_test.main(["smoke_test.py", BASE]) == 1
     assert "FAILED" in capsys.readouterr().out
+
+
+HOMEPAGE = '<html><title>WeatherCast</title><div id="root"></div></html>'
+
+
+def test_smoke_test_checks_homepage_only_for_frontend():
+    pages = []
+
+    def fetch_text(url):
+        pages.append(url)
+        return 200, HOMEPAGE
+
+    assert smoke_test.run(BASE, FakeFetch(HEALTHY), [].append, fetch_text=fetch_text) == []
+    assert pages == []
+    assert (
+        smoke_test.run(BASE, FakeFetch(HEALTHY), [].append, frontend=True, fetch_text=fetch_text)
+        == []
+    )
+    assert pages == [f"{BASE}/"]
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        (403, ""),  # bucket policy 或 OAC 設錯
+        (200, "<html>Some other site</html>"),
+        (200, '{"message": "Not Found"}'),  # 首頁被轉到 API Gateway
+    ],
+)
+def test_smoke_test_fails_on_wrong_homepage(page):
+    errors = smoke_test.run(
+        BASE, FakeFetch(HEALTHY), [].append, frontend=True, fetch_text=lambda url: page
+    )
+    assert errors == [f"/ returned {page[0]}, not the WeatherCast page"]
 
 
 class FakeResponse:
@@ -151,6 +190,19 @@ def test_get_json_reads_status_and_body(monkeypatch):
     assert smoke_test.get_json(BASE) == (200, {"status": "ok"})
 
 
+def test_get_text_reads_status_and_body(monkeypatch):
+    monkeypatch.setattr(smoke_test.urllib.request, "urlopen", lambda url, timeout: FakeResponse())
+    assert smoke_test.get_text(BASE) == (200, '{"status": "ok"}')
+
+
+def test_get_text_returns_http_error_status(monkeypatch):
+    def raise_403(url, timeout):
+        raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(smoke_test.urllib.request, "urlopen", raise_403)
+    assert smoke_test.get_text(BASE) == (403, "")
+
+
 def test_get_json_returns_http_error_status(monkeypatch):
     def raise_404(url, timeout):
         raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
@@ -168,7 +220,7 @@ def test_workflow_has_no_default_permissions():
 
 def test_deploy_requires_tests_and_never_runs_on_pull_requests():
     deploy = WORKFLOW["jobs"]["deploy"]
-    assert deploy["needs"] == "test"
+    assert deploy["needs"] == ["test", "frontend"]
     assert "github.event_name != 'pull_request'" in deploy["if"]
     assert "github.ref == 'refs/heads/main'" in deploy["if"]
 
@@ -215,6 +267,70 @@ def test_deploy_role_cannot_create_delete_or_escalate():
         "s3:DeleteObject",
         "lambda:UpdateFunctionCode",
         "lambda:UpdateFunctionConfiguration",
+        "cloudfront:CreateInvalidation",
     }
     assert not any(a.endswith(":*") for a in actions)
     assert "iam:PassRole" not in actions
+
+
+def test_deploy_role_writes_only_to_frontend_bucket_and_state():
+    # S3 的寫入只能落在 state 的 key 或前端 bucket，不能寫到帳號裡其他 bucket
+    statements = re.findall(r"statement \{(.*?)\n  \}", OIDC_TF, re.DOTALL)
+    assert sum('"s3:PutObject"' in body for body in statements) == 2
+    for body in statements:
+        if '"s3:PutObject"' in body:
+            resources = re.search(r"resources\s*=\s*\[(.*?)\]", body).group(1)
+            assert resources in (
+                '"${aws_s3_bucket.tf_state.arn}/weathercast/main.tfstate*"',
+                '"${local.frontend_bucket_arn}/*"',
+            )
+
+
+def test_frontend_bucket_name_matches_main_stack():
+    assert (
+        'frontend_bucket = "${var.project_name}-frontend-${data.aws_caller_identity' in FRONTEND_TF
+    )
+    assert '"arn:aws:s3:::${var.project_name}-frontend-${local.account_id}"' in OIDC_TF
+
+
+# --- 前端：bucket 不公開，只有這個 CloudFront 能讀 ---------------------------------
+
+
+def test_frontend_bucket_is_private_and_readable_only_by_this_distribution():
+    for flag in [
+        "block_public_acls",
+        "block_public_policy",
+        "ignore_public_acls",
+        "restrict_public_buckets",
+    ]:
+        assert re.search(rf"{flag}\s*=\s*true", FRONTEND_TF)
+    assert '"cloudfront.amazonaws.com"' in FRONTEND_TF
+    assert 'variable = "AWS:SourceArn"' in FRONTEND_TF
+    assert "values   = [aws_cloudfront_distribution.frontend.arn]" in FRONTEND_TF
+    assert 'signing_behavior                  = "always"' in FRONTEND_TF
+    assert "website" not in FRONTEND_TF.replace(
+        "# ", ""
+    )  # 不開 S3 static website hosting（只支援 HTTP）
+
+
+def test_cloudfront_forwards_api_without_caching_or_rewriting_errors():
+    api = re.search(r"ordered_cache_behavior \{(.*?)\n  \}", FRONTEND_TF, re.DOTALL).group(1)
+    assert 'path_pattern               = "/api/*"' in api
+    assert "local.cache_policy_caching_disabled" in api
+    assert "local.origin_request_all_except_host" in api  # 轉送 Host 會讓 API Gateway 回 403
+    # 錯誤頁改寫會套用到 /api/*，把 404 city_not_found 換成 HTML
+    assert "custom_error_response {" not in FRONTEND_TF
+    assert FRONTEND_TF.count('viewer_protocol_policy     = "redirect-to-https"') == 2
+
+
+def test_deploy_uploads_assets_before_index_and_uses_relative_api():
+    steps = WORKFLOW["jobs"]["deploy"]["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.index("Terraform apply") < names.index("Upload frontend to S3")
+    assert names.index("Upload frontend to S3") < names.index("Invalidate CloudFront cache")
+    upload = steps[names.index("Upload frontend to S3")]["run"].splitlines()
+    assert "dist/assets" in upload[0] and "immutable" in upload[0]
+    assert '--exclude "assets/*"' in upload[1] and "no-cache" in upload[1]
+    text = (ROOT / ".github" / "workflows" / "ci-cd.yml").read_text("utf-8")
+    assert "VITE_API_BASE_URL=" not in text and "VITE_API_BASE_URL:" not in text
+    assert "--frontend" in steps[names.index("Smoke test")]["run"]
