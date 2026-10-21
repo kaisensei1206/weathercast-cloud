@@ -7,6 +7,7 @@
   GET /health
   GET /cities
   GET /weather?city=Tainan
+  GET /fireworks
 """
 
 import json
@@ -14,6 +15,7 @@ import os
 import traceback
 
 from cities import CITIES
+from fireworks_service import get_fireworks
 from logger import log
 from weather_cache import cache_from_env
 from weather_client import UpstreamError, UpstreamTimeout
@@ -54,6 +56,8 @@ def route(event: dict) -> dict:
         )
     if path == "/weather":
         return weather((event.get("queryStringParameters") or {}).get("city"))
+    if path == "/fireworks":
+        return fireworks()
     return error(404, "not_found", "找不到這個路徑")
 
 
@@ -75,6 +79,21 @@ def weather(query: str | None) -> dict:
 
     meta = result["meta"]
     log("info", "weather_ok", city=result["city"]["id"], source=meta["source"], stale=meta["stale"])
+    return respond(200, result)
+
+
+def fireworks() -> dict:
+    try:
+        result = get_fireworks(cache=CACHE)
+    except UpstreamTimeout as exc:
+        log("warning", "upstream_timeout", provider="taiwan-tourism", detail=str(exc))
+        return error(504, "upstream_timeout", "活動資料來源回應逾時，請稍後再試")
+    except UpstreamError as exc:
+        log("warning", "upstream_error", provider="taiwan-tourism", detail=str(exc))
+        return error(502, "upstream_error", "活動資料來源暫時無法使用，請稍後再試")
+
+    meta = result["meta"]
+    log("info", "fireworks_ok", count=len(result["events"]), source=meta["source"])
     return respond(200, result)
 
 

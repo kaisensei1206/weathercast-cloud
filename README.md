@@ -11,6 +11,7 @@
 | `GET /api/health` | 健康檢查，回傳 `{"status":"ok"}` |
 | `GET /api/cities` | 支援的 22 縣市清單 |
 | `GET /api/weather?city=Tainan` | 目前天氣；`city` 接受中文（台／臺皆可）、英文或 ID |
+| `GET /api/fireworks` | 今年全臺的煙火相關活動（交通部觀光署開放資料），見 [docs/fireworks.md](docs/fireworks.md) |
 
 成功（200）：
 
@@ -89,6 +90,7 @@ flowchart LR
   APIGW --> L[Lambda<br/>Python 3.12]
   L <--> DDB[(DynamoDB<br/>快取 + TTL)]
   L --> OM[Open-Meteo API]
+  L --> TW[交通部觀光署 活動資料]
   L -.-> CW[CloudWatch Logs / Alarms]
   GA[GitHub Actions] -- OIDC --> TF[Terraform] -.-> CF & APIGW & L & DDB
 ```

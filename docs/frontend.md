@@ -49,11 +49,13 @@ frontend/
       WeatherCard.jsx       天氣卡
       StatusMessage.jsx     載入中與錯誤訊息
       WeatherBackdrop.jsx   動態天氣背景（純裝飾）
+      FireworksMap.jsx      煙火地圖（Leaflet，延遲載入）
     hooks/useWeatherScene.js        查詢狀態 → 背景場景
     hooks/usePrefersReducedMotion.js 系統的「減少動態效果」設定
     weather/scene.js        WMO 代碼分類、日夜判斷
     weather/effects.js      每種天氣的特效設定（顏色、強度）
     weather/particles.js    Canvas 雨、雪、星星
+    fireworks/events.js     煙火活動的狀態、篩選、日期文字
     App.jsx                 把以上組合起來
     index.css               樣式，含手機版、深色模式與天氣背景
 ```
@@ -172,9 +174,25 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
   - 不閃電；
   - 雨和雪只畫一張靜態畫面，仍然看得出天氣。
 
+### 煙火地圖
+
+首頁下方的地圖標出今年全臺的煙火相關活動（`GET /api/fireworks`，後端說明見 [fireworks.md](fireworks.md)）。
+
+| 項目 | 做法 | 原因 |
+|---|---|---|
+| 地圖套件 | Leaflet 1.9（gzip 後約 45 KB），直接使用，不加 `react-leaflet` | 少一層套件；地圖只在 `useEffect` 建立一次，卸載時 `map.remove()` |
+| 延遲載入 | `React.lazy` 拆成另一個檔案 | 首頁的 JS 大小不變，地圖等畫面出來後才下載 |
+| 底圖 | CARTO 淺色底圖，範圍用 `fitBounds` 包含本島、澎湖、金門 | 手機和桌面都剛好看到全臺 |
+| 標記 | `L.divIcon` 加 SVG 煙火圖示；煙火大會粗橘框、可能有煙火細框、已結束變灰、進行中有光暈 | 不用 ✺ 這種字元，因為不是每台電腦都有這個字型 |
+| 種類 | 名稱有煙火是「煙火大會」，只有說明提到是「可能有煙火」 | 觀光署資料沒有「煙火」分類，只能用文字判斷；說明提到不代表一定有煙火秀，所以分開標示並加註 |
+| 狀態 | 用活動的開始、結束時間和現在比較：即將舉行、進行中、已結束 | 時間字串含 `+08:00`，和使用者電腦的時區無關 |
+| 清單 | 地圖下方依日期列出；按一下地圖會移過去並打開說明 | 鍵盤和螢幕閱讀器也能使用，不必點地圖上的小圓點 |
+| 安全 | 彈出視窗用 DOM 的 `textContent` 組，網址只接受 http、https | 活動資料來自外部，不能當成 HTML 執行，也不能放進 `javascript:` 連結 |
+| 減少動態效果 | 進行中的光暈動畫停止 | 和動態天氣背景一致 |
+
 ## 4. 測試
 
-`npm test` 共 119 個測試，全部是假資料，不會呼叫真的 API：
+`npm test` 共 139 個測試，全部是假資料，不會呼叫真的 API：
 
 | 檔案 | 測什麼 |
 |---|---|
@@ -188,6 +206,9 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
 | `components/WeatherBackdrop.test.jsx` | `aria-hidden`；換天氣更新 CSS 變數；沒有 Canvas 和 `matchMedia` 也不會出錯；閃電計時器在換天氣、卸載、開啟減少動態效果時都會清掉 |
 | `hooks/useWeatherScene.test.js` | 載入中保留上一個背景；失敗回到預設；同一份資料回傳同一個物件 |
 | `App.test.jsx`（新增一個） | 換城市時背景跟著換，查詢失敗回到預設 |
+| `fireworks/events.test.js` | 已結束、進行中、即將舉行的判斷（含開始和結束的那一刻）；各種類的數量與篩選；日期用臺灣時間；只接受 http、https 網址 |
+| `components/FireworksMap.test.jsx` | 用假的 Leaflet：地圖只建立一次、每個活動一個標記、狀態與種類標示、篩選後標記跟著變、按清單移動地圖並打開說明、彈出視窗不會執行資料裡的 HTML、沒有活動和載入失敗的畫面、卸載後才回來的資料不會畫 |
+| `api/weatherApi.test.js`（新增三個） | `fetchFireworks` 的網址、缺欄位時補空陣列、502 歸類為伺服器錯誤 |
 
 CI 的 `Frontend` job 在每個 PR 都會執行 `npm ci`、`npm test`、`npm run build`。
 

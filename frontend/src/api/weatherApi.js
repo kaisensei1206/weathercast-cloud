@@ -87,3 +87,13 @@ export async function fetchCities(options) {
   const body = await getJson('/api/cities', options)
   return Array.isArray(body.cities) ? body.cities : []
 }
+
+/** GET /api/fireworks，回傳 { year, events, meta }；events 是今年全臺的煙火相關活動 */
+export async function fetchFireworks(options) {
+  const body = await getJson('/api/fireworks', options)
+  return {
+    year: body.year,
+    events: Array.isArray(body.events) ? body.events : [],
+    meta: body.meta ?? {},
+  }
+}

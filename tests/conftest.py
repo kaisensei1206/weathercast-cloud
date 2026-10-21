@@ -4,6 +4,7 @@
 - `block_network` 自動套用在每個測試上，任何真的對外連線都會讓測試失敗。
 - 需要 Open-Meteo 回應的測試使用 `upstream`，它把 urllib 的 urlopen 換成假的，
   由測試決定回傳什麼資料或丟出什麼例外。
+- 需要觀光署活動資料的測試使用 `tourism`，做法相同。
 - 需要 DynamoDB 的測試使用 `cache_table`，它用 moto 在記憶體裡模擬 DynamoDB，
   不需要 AWS 帳號，也不會產生費用。
 """
@@ -16,9 +17,10 @@ import boto3
 import pytest
 from moto import mock_aws
 
+import fireworks_client
 import handler
 import weather_client
-from fakes import TABLE_NAME, FakeUpstream
+from fakes import SAMPLE_EVENT, TABLE_NAME, FakeUpstream, event_list, tourism_zip
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +55,15 @@ def cache_table():
             AttributeDefinitions=[{"AttributeName": "city_id", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
+
+
+@pytest.fixture
+def tourism(monkeypatch) -> FakeUpstream:
+    """假的觀光署：urlopen 預設回傳只有 SAMPLE_EVENT 一筆活動的 zip。"""
+    fake = FakeUpstream()
+    fake.returns(tourism_zip(event_list(SAMPLE_EVENT)))
+    monkeypatch.setattr(fireworks_client.urllib.request, "urlopen", fake)
+    return fake
 
 
 @pytest.fixture

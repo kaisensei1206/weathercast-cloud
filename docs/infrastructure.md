@@ -21,7 +21,7 @@
 | `aws_lambda_function.api` | Python 3.12、arm64，handler 是 `handler.lambda_handler`，環境變數帶入快取設定 |
 | `aws_apigatewayv2_api.http` | HTTP API，CORS 只開放設定的來源 |
 | `aws_apigatewayv2_integration.lambda` | Lambda proxy 整合，payload 2.0 |
-| `aws_apigatewayv2_route.routes` | `GET /api/health`、`GET /api/cities`、`GET /api/weather`，其他路徑直接 404 |
+| `aws_apigatewayv2_route.routes` | `GET /api/health`、`GET /api/cities`、`GET /api/weather`、`GET /api/fireworks`，其他路徑直接 404 |
 | `aws_cloudwatch_log_group.api_access` | API Gateway 存取紀錄，保留 14 天 |
 | `aws_apigatewayv2_stage.default` | `$default` stage，自動部署，節流每秒 10 次、瞬間 20 次，並寫入存取紀錄 |
 | `aws_lambda_permission.apigw` | 允許這個 API 呼叫 Lambda |

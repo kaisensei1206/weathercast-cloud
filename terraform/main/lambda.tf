@@ -23,7 +23,7 @@ resource "aws_cloudwatch_log_group" "lambda" {
 
 resource "aws_lambda_function" "api" {
   function_name = local.function_name
-  description   = "WeatherCast API: /api/health, /api/cities, /api/weather"
+  description   = "WeatherCast API: /api/health, /api/cities, /api/weather, /api/fireworks"
   role          = aws_iam_role.lambda.arn
 
   runtime       = "python3.12"

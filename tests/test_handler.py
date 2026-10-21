@@ -4,6 +4,7 @@
 所以這裡驗證的是「各種上游狀況最後會變成哪個 HTTP 狀態碼」。
 """
 
+import functools
 import http.client
 import importlib
 import json
@@ -15,6 +16,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+import fireworks_service
 import handler
 from fakes import SAMPLE_CURRENT, TABLE_NAME
 from weather_cache import WeatherCache
@@ -319,3 +321,38 @@ def test_cold_start_fails_on_bad_cache_setting(monkeypatch, reload_handler):
     monkeypatch.setenv("CACHE_FRESH_SECONDS", "ten minutes")
     with pytest.raises(ValueError, match="CACHE_FRESH_SECONDS"):
         reload_handler()
+
+
+# --- /fireworks ---------------------------------------------------------------
+
+
+def test_fireworks_success(api, tourism, capsys, monkeypatch):
+    # 固定在 2026 年，測試結果不會因為執行的年份而改變
+    fixed = functools.partial(fireworks_service.get_fireworks, clock=lambda: 1792148400)
+    monkeypatch.setattr(handler, "get_fireworks", fixed)
+    resp = api("/api/fireworks")
+
+    assert resp.status == 200
+    assert resp.body["year"] == 2026
+    assert [e["name"] for e in resp.body["events"]] == ["2026成功鎮花火之夜"]
+    assert resp.body["meta"]["provider"] == "taiwan-tourism"
+    assert log_lines(capsys)[-1]["message"] == "fireworks_ok"
+
+
+@pytest.mark.parametrize(
+    ("exc", "status", "code"),
+    [
+        (TimeoutError("timed out"), 504, "upstream_timeout"),
+        (urllib.error.HTTPError("https://x", 503, "x", {}, None), 502, "upstream_error"),
+    ],
+)
+def test_fireworks_upstream_failures(api, tourism, exc, status, code):
+    tourism.raises(exc)
+    api("/api/fireworks").assert_error(status, code)
+
+
+def test_fireworks_are_cached(cached_api, tourism):
+    cached_api("/api/fireworks")
+    second = cached_api("/api/fireworks")
+    assert second.body["meta"]["source"] == "cache"
+    assert len(tourism.calls) == 1
