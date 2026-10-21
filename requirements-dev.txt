@@ -1,6 +1,6 @@
 # Local development and CI only; never packaged into the Lambda function.
 -r requirements.txt
-pytest==9.0.3
+pytest==9.1.1
 pytest-cov==6.1.1
 moto[dynamodb]==5.1.4
 boto3==1.38.8
