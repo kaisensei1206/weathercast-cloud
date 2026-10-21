@@ -6,7 +6,7 @@
 - 所有資源都在 `ap-northeast-1`（東京）。
 - 每一步都標示了驗證狀態，說明見下一節。
 
-> **目前狀態：已部署（2026-10-19）。** 第 1 到 7 節已在真實 AWS 執行過一次（bootstrap 當時是 6 個資源，主 stack 13 個）。下方各節的 ⏳ 標示保留第七階段撰寫時的狀態。第八階段在 bootstrap 加了 GitHub Actions 用的 OIDC 與部署角色（+3 個資源），說明見 [cicd.md](cicd.md)。之後主 stack 加了前端的 S3 + CloudFront（+6 個資源，共 19 個），已經部署過的環境怎麼升級見 [frontend.md 第 5 節](frontend.md#5-部署到-s3--cloudfront)。
+> **目前狀態：已部署（2026-10-19）。** 第 1 到 7 節已在真實 AWS 執行過一次（bootstrap 當時是 6 個資源，主 stack 13 個）。下方各節的 ⏳ 標示保留第七階段撰寫時的狀態。第八階段在 bootstrap 加了 GitHub Actions 用的 OIDC 與部署角色（+3 個資源），說明見 [cicd.md](cicd.md)。之後主 stack 加了前端的 S3 + CloudFront（+6 個資源，共 19 個），已經部署過的環境怎麼升級見 [frontend.md 第 5 節](frontend.md#5-部署到-s3--cloudfront)。再之後加了颱風路由 `GET /api/typhoons`（+1 個資源，共 20 個），需要的氣象署授權碼存在 SSM，見 [typhoon.md](typhoon.md)。
 
 ## 驗證狀態
 
@@ -23,10 +23,10 @@
 | `terraform fmt`、`terraform validate` | ✅ | 你的電腦（Terraform 1.16.5）和沙盒都通過 |
 | 本機工具版本 | ✅ | 你的電腦：Terraform 1.16.5、AWS CLI 2.38.1、Python 3.12.3 |
 | bootstrap 的 plan | 🧪 | `Plan: 9 to add, 0 to change, 0 to destroy.`（第七階段的 6 個 S3 資源已在真實 AWS 建立 ✅；第八階段加的 3 個 IAM 資源只在沙盒驗證過） |
-| 主 stack 用 S3 backend 初始化與 plan | 🧪 | `Plan: 19 to add, 0 to change, 0 to destroy.`（13 個後端資源已在真實 AWS 建立 ✅；前端的 6 個只在沙盒驗證過） |
-| apply、讀取 output、再 plan 一次 | 🧪 | `19 added`；只有後端資源時，第二次 plan 顯示 `No changes`（前端見下方 moto 的限制） |
+| 主 stack 用 S3 backend 初始化與 plan | 🧪 | `Plan: 20 to add, 0 to change, 0 to destroy.`（13 個後端資源已在真實 AWS 建立 ✅；前端的 6 個和颱風路由只在沙盒驗證過） |
+| apply、讀取 output、再 plan 一次 | 🧪 | `20 added`；只有後端資源時，第二次 plan 顯示 `No changes`（前端見下方 moto 的限制） |
 | 只改程式碼時的 plan | 🧪 | `Plan: 0 to add, 1 to change, 0 to destroy.`，變更的是 `source_code_hash` |
-| plan -destroy、destroy、bootstrap 防刪 | 🧪 | 只有後端時 `13 to destroy`、`13 destroyed`；加上前端後 plan 是 `19 to destroy`，但 moto 無法停用 CloudFront，destroy 沒有跑完。bootstrap 回 `Instance cannot be destroyed` |
+| plan -destroy、destroy、bootstrap 防刪 | 🧪 | 只有後端時 `13 to destroy`、`13 destroyed`；加上前端後 plan 是 `20 to destroy`，但 moto 無法停用 CloudFront，destroy 沒有跑完。bootstrap 回 `Instance cannot be destroyed` |
 | 手冊裡的 AWS CLI 查詢指令 | 🧪 | 用 AWS CLI 2.38.1（和你電腦同版）對 moto 執行，輸出格式符合手冊 |
 | 直接呼叫 Lambda 用的事件檔 | ✅ | 用 PowerShell 產生 JSON 檔，交給本機 handler 執行，`/api/health` 回 200 |
 | AWS 帳號設定、SSO 登入、真實的 plan 與 apply、線上測試、CloudWatch、費用、清除 | ⏳ | 需要你的 AWS 帳號 |
@@ -223,6 +223,7 @@ aws configure get region               # 應該是 ap-northeast-1
 | `api_throttle_rate_limit` | `10` | 每秒平均請求上限 |
 | `api_throttle_burst_limit` | `20` | 瞬間請求上限 |
 | `cors_allow_origins` | `["http://localhost:5173"]` | 允許跨網域呼叫的來源 |
+| `cwa_api_key_parameter` | `/weathercast/cwa-api-key` | 氣象署授權碼在 SSM 的參數名稱；Lambda 只拿到名稱，執行時才讀取 |
 
 如果只想暫時改一個值，可以在 plan 時加參數，例如 `terraform plan "-var=log_retention_days=7" "-out=main.tfplan"`，但每次 plan 都要帶。要長期修改，請直接改 `variables.tf` 的預設值並發 PR。`*.tfvars` 被 `.gitignore` 排除，其他電腦和 CI 都看不到。
 
@@ -307,7 +308,7 @@ terraform plan "-out=main.tfplan"
 | `init` | `Successfully configured the backend "s3"!` 和 `Terraform has been successfully initialized!`（🧪） |
 | `fmt -check` | 沒有輸出。如果列出檔名，執行 `terraform fmt -recursive ..`，修正後再 commit |
 | `validate` | `Success! The configuration is valid.`（✅） |
-| `plan` | `Plan: 19 to add, 0 to change, 0 to destroy.`（🧪），同時產生 `build\lambda.zip` |
+| `plan` | `Plan: 20 to add, 0 to change, 0 to destroy.`（🧪），同時產生 `build\lambda.zip` |
 
 - **為什麼 init 要帶 bucket？** 因為 backend 的 bucket 名稱含帳號 ID，沒有寫死在程式碼裡，要在 init 時用 `-backend-config` 帶入。
 - **init 問要不要複製 state？** 如果出現 `Do you want to copy existing state to the new backend?`，代表 `terraform\main` 裡有舊的本機 state。先停下來確認，正常情況不會出現這個問題。
@@ -320,13 +321,14 @@ terraform plan "-out=main.tfplan"
 terraform show -no-color main.tfplan | Select-String "will be created|will be updated|must be replaced|will be destroyed" | ForEach-Object Line
 ```
 
-第一次部署時，預期有 19 行，而且全部是 `will be created`（🧪）。前 13 個是後端，`cloudfront` 和 `s3_bucket` 開頭的 6 個是前端：
+第一次部署時，預期有 20 行，而且全部是 `will be created`（🧪）。其中 14 個是後端，`cloudfront` 和 `s3_bucket` 開頭的 6 個是前端：
 
 ```text
   # aws_apigatewayv2_api.http will be created
   # aws_apigatewayv2_integration.lambda will be created
   # aws_apigatewayv2_route.routes["GET /api/cities"] will be created
   # aws_apigatewayv2_route.routes["GET /api/health"] will be created
+  # aws_apigatewayv2_route.routes["GET /api/typhoons"] will be created
   # aws_apigatewayv2_route.routes["GET /api/weather"] will be created
   # aws_apigatewayv2_stage.default will be created
   # aws_cloudfront_distribution.frontend will be created
@@ -411,7 +413,7 @@ terraform apply main.tfplan
 ```
 
 - **不會再問 yes**，會直接照 `main.tfplan` 執行。
-- **預期結果**：`Apply complete! Resources: 19 added, 0 changed, 0 destroyed.`（🧪），最後印出 output。
+- **預期結果**：`Apply complete! Resources: 20 added, 0 changed, 0 destroyed.`（🧪），最後印出 output。
 - **CloudFront 比較慢**：distribution 要部署到全球節點，`aws_cloudfront_distribution.frontend: Still creating...` 可能持續 3 到 10 分鐘，這是正常的。
 - **出現 `Saved plan is stale`**：代表 plan 之後 state 變過了。重新執行 `terraform plan "-out=main.tfplan"`，檢查後再 apply。
 - **中途失敗時**：已建立的資源都記在 state 裡。修正原因後重新 plan，這次只會列出還沒建立的部分，再 apply。不要到主控台手動刪除資源。
@@ -448,7 +450,7 @@ aws apigatewayv2 get-apis --query "Items[?Name=='weathercast-api'].ApiEndpoint" 
 
 ## 7. 測試線上 API ⏳
 
-**路徑要加 `/api` 前綴。** 需求裡的 `GET /health` 和 `GET /weather?city=Tainan`，在線上是 `/api/health` 和 `/api/weather?city=Tainan`。API Gateway 只開放三條 `/api/...` 路由，因為之後 CloudFront 會把 `/api/*` 轉給 API。沒有前綴的 `/health` 會得到 API Gateway 自己回的 404。
+**路徑要加 `/api` 前綴。** 需求裡的 `GET /health` 和 `GET /weather?city=Tainan`，在線上是 `/api/health` 和 `/api/weather?city=Tainan`。API Gateway 只開放四條 `/api/...` 路由，因為之後 CloudFront 會把 `/api/*` 轉給 API。沒有前綴的 `/health` 會得到 API Gateway 自己回的 404。
 
 ```powershell
 curl.exe -s -i "$api/api/health"
@@ -604,7 +606,7 @@ $zip.Entries.FullName
 $zip.Dispose()
 ```
 
-第 3 步預期列出 6 個檔案，而且都在最上層，沒有多一層資料夾（🧪）：`cities.py`、`handler.py`、`logger.py`、`weather_cache.py`、`weather_client.py`、`weather_service.py`。
+第 3 步預期列出 8 個檔案，而且都在最上層，沒有多一層資料夾（🧪）：`cities.py`、`handler.py`、`logger.py`、`typhoon_client.py`、`typhoon_service.py`、`weather_cache.py`、`weather_client.py`、`weather_service.py`。
 
 **直接呼叫 Lambda，跳過 API Gateway。** 如果直接呼叫正常、透過網址卻失敗，問題就出在 API Gateway 和 Lambda 之間（見 9-3）。
 
@@ -733,9 +735,9 @@ terraform show -no-color destroy.tfplan | Select-String "will be destroyed" | Fo
 terraform apply destroy.tfplan
 ```
 
-- **plan 預期**：`Plan: 0 to add, 0 to change, 19 to destroy.`（🧪）。列出的 19 行應該正好是 4-1 那 19 個資源，而且都是 `will be destroyed`。
+- **plan 預期**：`Plan: 0 to add, 0 to change, 20 to destroy.`（🧪）。列出的 20 行應該正好是 4-1 那 20 個資源，而且都是 `will be destroyed`。
 - **CloudFront 要先停用才能刪除**：Terraform 會自動停用、等它部署完再刪除，這一步可能要 10 分鐘以上。前端 bucket 設了 `force_destroy`，裡面的檔案會一起刪除（都可以用 `npm run build` 重新產生）。
-- **apply 預期**：`Apply complete! Resources: 0 added, 0 changed, 19 destroyed.`（⏳：moto 無法停用 CloudFront，沒有模擬到最後）。
+- **apply 預期**：`Apply complete! Resources: 0 added, 0 changed, 20 destroyed.`（⏳：moto 無法停用 CloudFront，沒有模擬到最後）。
 - **為什麼不直接用 `terraform destroy`**：先用 `plan -destroy` 存成檔案、看過再執行，和建立時是同一個習慣。直接用 `terraform destroy` 也可以，它會列出要刪的資源，並要求你輸入 yes。
 
 確認已經刪除：

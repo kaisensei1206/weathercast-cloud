@@ -87,3 +87,9 @@ export async function fetchCities(options) {
   const body = await getJson('/api/cities', options)
   return Array.isArray(body.cities) ? body.cities : []
 }
+
+/** GET /api/typhoons，回傳後端整理好的颱風清單（沒有颱風時是空陣列） */
+export async function fetchTyphoons(options) {
+  const body = await getJson('/api/typhoons', options)
+  return Array.isArray(body.typhoons) ? body.typhoons : []
+}

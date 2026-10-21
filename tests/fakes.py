@@ -18,6 +18,69 @@ SAMPLE_CURRENT = {
     "weather_code": 1,
 }
 
+# 氣象署 W-C0034-005（颱風路徑）回應的範例。
+# 欄位依氣象署開放資料文件整理，還沒有用真實回應核對過，見 docs/typhoon.md
+SAMPLE_CWA = {
+    "success": "true",
+    "records": {
+        "tropicalCyclones": {
+            "tropicalCyclone": [
+                {
+                    "year": "2026",
+                    "typhoonName": "FUNG-WONG",
+                    "cwaTyphoonName": "鳳凰",
+                    "cwaTyNo": "26",
+                    "analysisData": {
+                        "fix": [
+                            {
+                                "fixTime": "2026-10-20T08:00:00+08:00",
+                                "coordinate": "128.0,18.5",
+                                "maxWindSpeed": "33",
+                                "maxGustSpeed": "43",
+                                "pressure": "965",
+                                "movingSpeed": "18",
+                                "movingDirection": "WNW",
+                                "circleOf15Ms": {"radius": "200"},
+                            },
+                            {
+                                "fixTime": "2026-10-20T14:00:00+08:00",
+                                "coordinate": "127.0,19.0",
+                                "maxWindSpeed": "38",
+                                "maxGustSpeed": "48",
+                                "pressure": "955",
+                                "movingSpeed": "20",
+                                "movingDirection": "WNW",
+                                "circleOf15Ms": {"radius": "250"},
+                            },
+                        ]
+                    },
+                    "forecastData": {
+                        "fix": [
+                            {
+                                "initTime": "2026-10-20T14:00:00+08:00",
+                                "tau": "24",
+                                "coordinate": "124.5,20.5",
+                                "maxWindSpeed": "43",
+                                "maxGustSpeed": "53",
+                                "pressure": "945",
+                                "radiusOf70PercentProbability": "120",
+                            },
+                            {
+                                "initTime": "2026-10-20T14:00:00+08:00",
+                                "tau": "48",
+                                "coordinate": "122.0,22.5",
+                                "maxWindSpeed": "40",
+                                "pressure": "950",
+                                "radiusOf70PercentProbability": "200",
+                            },
+                        ]
+                    },
+                }
+            ]
+        }
+    },
+}
+
 
 class FakeUpstream:
     """假的 urlopen：記錄每次呼叫，回傳設定好的內容或丟出設定好的例外。"""

@@ -4,6 +4,7 @@
 - `block_network` 自動套用在每個測試上，任何真的對外連線都會讓測試失敗。
 - 需要 Open-Meteo 回應的測試使用 `upstream`，它把 urllib 的 urlopen 換成假的，
   由測試決定回傳什麼資料或丟出什麼例外。
+- 需要氣象署颱風資料的測試使用 `cwa`，做法相同。
 - 需要 DynamoDB 的測試使用 `cache_table`，它用 moto 在記憶體裡模擬 DynamoDB，
   不需要 AWS 帳號，也不會產生費用。
 """
@@ -17,8 +18,9 @@ import pytest
 from moto import mock_aws
 
 import handler
+import typhoon_client
 import weather_client
-from fakes import TABLE_NAME, FakeUpstream
+from fakes import SAMPLE_CWA, TABLE_NAME, FakeUpstream
 
 
 @pytest.fixture(autouse=True)
@@ -34,13 +36,15 @@ def block_network(monkeypatch):
 @pytest.fixture(autouse=True)
 def isolate_aws(monkeypatch):
     """不讓測試讀到開發者電腦上的 AWS 設定或帳號，也讓 handler 預設不使用快取。"""
-    for name in ("CACHE_TABLE", "CACHE_FRESH_SECONDS", "CACHE_RETAIN_SECONDS", "AWS_PROFILE"):
+    names = ("CACHE_TABLE", "CACHE_FRESH_SECONDS", "CACHE_RETAIN_SECONDS", "AWS_PROFILE")
+    for name in (*names, "CWA_API_KEY", "CWA_API_KEY_PARAM"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-northeast-1")
     monkeypatch.setattr(handler, "CACHE", None)
+    typhoon_client.reset_key_cache()
 
 
 @pytest.fixture
@@ -53,6 +57,16 @@ def cache_table():
             AttributeDefinitions=[{"AttributeName": "city_id", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
+
+
+@pytest.fixture
+def cwa(monkeypatch) -> FakeUpstream:
+    """假的氣象署：金鑰用環境變數提供，urlopen 預設回傳 SAMPLE_CWA。"""
+    monkeypatch.setenv("CWA_API_KEY", "test-key")
+    fake = FakeUpstream()
+    fake.returns(SAMPLE_CWA)
+    monkeypatch.setattr(typhoon_client.urllib.request, "urlopen", fake)
+    return fake
 
 
 @pytest.fixture

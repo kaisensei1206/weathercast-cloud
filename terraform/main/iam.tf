@@ -25,6 +25,16 @@ data "aws_iam_policy_document" "lambda" {
   }
 
   statement {
+    sid = "ReadCwaApiKey"
+    # 只能讀這一個參數。SecureString 用 AWS 受管的 aws/ssm 金鑰加密，
+    # 透過 SSM 解密時不需要另外給 kms:Decrypt
+    actions = ["ssm:GetParameter"]
+    resources = [
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.cwa_api_key_parameter}",
+    ]
+  }
+
+  statement {
     sid = "WriteOwnLogs"
     # log group 由 Terraform 建立，所以不給 logs:CreateLogGroup
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]

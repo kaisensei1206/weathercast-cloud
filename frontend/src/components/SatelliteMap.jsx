@@ -1,10 +1,18 @@
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { fetchTyphoons } from '../api/weatherApi.js'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion.js'
 import { MAX_NATIVE_ZOOM, formatTaipeiTime, frameTimes, tileUrl } from '../satellite/frames.js'
+import { describeTyphoon, drawTyphoons } from '../typhoon/typhoon.js'
 
 const TAIWAN = [23.7, 121]
+const LEGEND = [
+  ['track', '過去路徑'],
+  ['forecast', '預測路徑'],
+  ['probability', '70% 機率範圍'],
+  ['gale', '7 級風暴風圈'],
+]
 const FRAME_MS = 600 // 每張停留時間
 const LAST_FRAME_MS = 1800 // 播到最新一張多停一下，看得出「這是現在」
 
@@ -22,14 +30,18 @@ const ATTRIBUTION =
  *   播放時只切換透明度，不會一張一張重新下載而閃爍。
  * - 卸載時移除地圖（含所有事件）和計時器。
  * - 偏好減少動態效果時不自動播放，停在最新一張。
+ * - 颱風路徑來自 /api/typhoons（中央氣象署），畫在雲圖上面、不跟著時間軸切換。
+ *   取得失敗（例如還沒設定授權碼）就只顯示雲圖，不顯示錯誤。
  */
 export default function SatelliteMap() {
   const times = useMemo(() => frameTimes(), [])
   const reducedMotion = usePrefersReducedMotion()
   const containerRef = useRef(null)
   const layersRef = useRef([])
+  const typhoonGroupRef = useRef(null)
   const [frame, setFrame] = useState(times.length - 1)
   const [playing, setPlaying] = useState(!reducedMotion)
+  const [typhoons, setTyphoons] = useState(null) // null：還沒取得或取得失敗
 
   useEffect(() => {
     const map = L.map(containerRef.current, {
@@ -51,11 +63,29 @@ export default function SatelliteMap() {
       }).addTo(map),
     )
 
+    // 颱風圖層在所有雲圖圖層之後加入，所以畫在雲的上面
+    typhoonGroupRef.current = L.layerGroup().addTo(map)
+
     return () => {
       map.remove()
       layersRef.current = []
+      typhoonGroupRef.current = null
     }
   }, [times])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchTyphoons()
+      .then((list) => !cancelled && setTyphoons(list))
+      .catch(() => !cancelled && setTyphoons(null))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typhoons && typhoonGroupRef.current) drawTyphoons(L, typhoonGroupRef.current, typhoons)
+  }, [typhoons])
 
   // 只切換透明度
   useEffect(() => {
@@ -115,6 +145,31 @@ export default function SatelliteMap() {
         {/* 不用 <output>：它預設是 live region，播放時螢幕閱讀器會每 0.6 秒念一次 */}
         <span className="satellite__time">{formatTaipeiTime(times[frame])}（臺灣時間）</span>
       </div>
+
+      {typhoons && (
+        <div className="typhoons">
+          <h3 className="typhoons__title">颱風動態（中央氣象署）</h3>
+          {typhoons.length === 0 ? (
+            <p className="typhoons__empty">目前沒有颱風或熱帶性低氣壓。</p>
+          ) : (
+            <>
+              <ul className="typhoons__list">
+                {typhoons.map((t) => (
+                  <li key={`${t.number ?? ''}-${t.name}`}>{describeTyphoon(t)}</li>
+                ))}
+              </ul>
+              <ul className="typhoons__legend" aria-label="圖例">
+                {LEGEND.map(([key, label]) => (
+                  <li key={key}>
+                    <span className={`typhoons__key typhoons__key--${key}`} aria-hidden="true" />
+                    {label}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
     </section>
   )
 }

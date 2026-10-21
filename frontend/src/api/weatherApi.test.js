@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiUrl, fetchCities, fetchWeather } from './weatherApi.js'
-import { CITIES, TAINAN, jsonResponse } from '../test/fixtures.js'
+import { ApiError, apiUrl, fetchCities, fetchTyphoons, fetchWeather } from './weatherApi.js'
+import { CITIES, TAINAN, TYPHOON, jsonResponse } from '../test/fixtures.js'
 
 let fetchMock
 
@@ -117,5 +117,29 @@ describe('fetchCities', () => {
     fetchMock.mockResolvedValue(jsonResponse(200, {}))
 
     await expect(fetchCities()).resolves.toEqual([])
+  })
+})
+
+describe('fetchTyphoons', () => {
+  it('returns the typhoon list', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { typhoons: [TYPHOON], meta: {} }))
+
+    await expect(fetchTyphoons()).resolves.toEqual([TYPHOON])
+    expect(fetchMock.mock.calls[0][0]).toBe(apiUrl('/api/typhoons'))
+  })
+
+  it('returns an empty list when the body has no typhoons', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, {}))
+
+    await expect(fetchTyphoons()).resolves.toEqual([])
+  })
+
+  it('reports a server error when the feature is not configured', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(503, { error: 'typhoon_not_configured', message: '颱風資料尚未設定' }),
+    )
+
+    const error = await errorOf(fetchTyphoons())
+    expect(error).toMatchObject({ kind: 'server', status: 503, code: 'typhoon_not_configured' })
   })
 })

@@ -106,3 +106,17 @@ variable "cors_allow_origins" {
     error_message = "不要使用 \"*\"，請列出明確的網址。"
   }
 }
+
+variable "cwa_api_key_parameter" {
+  description = <<-EOT
+    存放中央氣象署授權碼的 SSM Parameter Store 參數名稱（SecureString）。
+    參數由人用 aws ssm put-parameter 建立，不由 Terraform 管理，金鑰才不會出現在 Terraform state 裡。
+  EOT
+  type        = string
+  default     = "/weathercast/cwa-api-key"
+
+  validation {
+    condition     = can(regex("^/[A-Za-z0-9_./-]+$", var.cwa_api_key_parameter))
+    error_message = "cwa_api_key_parameter 必須是以 / 開頭的 SSM 參數名稱。"
+  }
+}

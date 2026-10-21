@@ -25,10 +25,10 @@ resource "aws_apigatewayv2_integration" "lambda" {
   timeout_milliseconds   = (var.lambda_timeout_seconds + 1) * 1000
 }
 
-# 只開放這三條路由，其他路徑由 API Gateway 直接回 404，不會執行 Lambda。
+# 只開放這四條路由，其他路徑由 API Gateway 直接回 404，不會執行 Lambda。
 # 路徑帶 /api 前綴，之後前端透過 CloudFront 的 /api/* 轉發時，路徑不用改寫。
 resource "aws_apigatewayv2_route" "routes" {
-  for_each = toset(["GET /api/health", "GET /api/cities", "GET /api/weather"])
+  for_each = toset(["GET /api/health", "GET /api/cities", "GET /api/weather", "GET /api/typhoons"])
 
   api_id    = aws_apigatewayv2_api.http.id
   route_key = each.value

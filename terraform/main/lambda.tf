@@ -23,7 +23,7 @@ resource "aws_cloudwatch_log_group" "lambda" {
 
 resource "aws_lambda_function" "api" {
   function_name = local.function_name
-  description   = "WeatherCast API: /api/health, /api/cities, /api/weather"
+  description   = "WeatherCast API: /api/health, /api/cities, /api/weather, /api/typhoons"
   role          = aws_iam_role.lambda.arn
 
   runtime       = "python3.12"
@@ -41,6 +41,7 @@ resource "aws_lambda_function" "api" {
       CACHE_TABLE          = aws_dynamodb_table.cache.name
       CACHE_FRESH_SECONDS  = tostring(var.cache_fresh_seconds)
       CACHE_RETAIN_SECONDS = tostring(var.cache_retain_seconds)
+      CWA_API_KEY_PARAM    = var.cwa_api_key_parameter # 只有名稱，金鑰在執行時才從 SSM 讀取
     }
   }
 

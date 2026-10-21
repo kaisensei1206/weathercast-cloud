@@ -15,13 +15,13 @@
 |---|---|
 | `aws_dynamodb_table.cache` | 天氣快取，Partition Key 是 `city_id`，TTL 屬性是 `expires_at`，On-Demand 計費 |
 | `aws_iam_role.lambda` | Lambda 執行角色，只有 Lambda 服務能使用 |
-| `aws_iam_role_policy.lambda` | 只允許對快取表做 `GetItem`、`PutItem`，以及寫入自己的 log group |
+| `aws_iam_role_policy.lambda` | 只允許對快取表做 `GetItem`、`PutItem`、寫入自己的 log group，以及讀取氣象署授權碼這一個 SSM 參數 |
 | `aws_cloudwatch_log_group.lambda` | Lambda 的 log，保留 14 天 |
 | `data.archive_file.lambda` | 把 `backend/src` 打包成 zip |
-| `aws_lambda_function.api` | Python 3.12、arm64，handler 是 `handler.lambda_handler`，環境變數帶入快取設定 |
+| `aws_lambda_function.api` | Python 3.12、arm64，handler 是 `handler.lambda_handler`，環境變數帶入快取設定和授權碼的 SSM 參數名稱（不是授權碼本身） |
 | `aws_apigatewayv2_api.http` | HTTP API，CORS 只開放設定的來源 |
 | `aws_apigatewayv2_integration.lambda` | Lambda proxy 整合，payload 2.0 |
-| `aws_apigatewayv2_route.routes` | `GET /api/health`、`GET /api/cities`、`GET /api/weather`，其他路徑直接 404 |
+| `aws_apigatewayv2_route.routes` | `GET /api/health`、`GET /api/cities`、`GET /api/weather`、`GET /api/typhoons`，其他路徑直接 404 |
 | `aws_cloudwatch_log_group.api_access` | API Gateway 存取紀錄，保留 14 天 |
 | `aws_apigatewayv2_stage.default` | `$default` stage，自動部署，節流每秒 10 次、瞬間 20 次，並寫入存取紀錄 |
 | `aws_lambda_permission.apigw` | 允許這個 API 呼叫 Lambda |

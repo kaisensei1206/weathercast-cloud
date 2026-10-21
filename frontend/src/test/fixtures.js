@@ -30,3 +30,29 @@ export function jsonResponse(status, body) {
     },
   }
 }
+
+// /api/typhoons 回傳的一個颱風（格式見 backend/src/typhoon_client.py 的 parse_typhoon）
+export const TYPHOON = {
+  name: '鳳凰',
+  name_en: 'FUNG-WONG',
+  number: '26',
+  current: {
+    time: '2026-10-20T14:00:00+08:00',
+    lat: 19,
+    lon: 127,
+    max_wind_ms: 38,
+    max_gust_ms: 48,
+    pressure_hpa: 955,
+    moving_speed_kmh: 20,
+    moving_direction: 'WNW',
+    radius_15ms_km: 250,
+  },
+  track: [
+    { time: '2026-10-20T08:00:00+08:00', lat: 18.5, lon: 128 },
+    { time: '2026-10-20T14:00:00+08:00', lat: 19, lon: 127 },
+  ],
+  forecast: [
+    { time: '2026-10-21T14:00:00+08:00', lat: 20.5, lon: 124.5, tau_hours: 24, radius_70pct_km: 120 },
+    { time: '2026-10-22T14:00:00+08:00', lat: 22.5, lon: 122, tau_hours: 48, radius_70pct_km: null },
+  ],
+}

@@ -319,3 +319,40 @@ def test_cold_start_fails_on_bad_cache_setting(monkeypatch, reload_handler):
     monkeypatch.setenv("CACHE_FRESH_SECONDS", "ten minutes")
     with pytest.raises(ValueError, match="CACHE_FRESH_SECONDS"):
         reload_handler()
+
+
+# --- /typhoons ----------------------------------------------------------------
+
+
+def test_typhoons_success(api, cwa, capsys):
+    resp = api("/api/typhoons")
+
+    assert resp.status == 200
+    assert [t["name"] for t in resp.body["typhoons"]] == ["鳳凰"]
+    assert resp.body["meta"]["provider"] == "cwa"
+    assert log_lines(capsys)[-1]["message"] == "typhoons_ok"
+
+
+def test_typhoons_without_key_returns_503(api):
+    api("/api/typhoons").assert_error(503, "typhoon_not_configured")
+
+
+@pytest.mark.parametrize(
+    ("exc", "status", "code"),
+    [
+        (TimeoutError("timed out"), 504, "upstream_timeout"),
+        (urllib.error.HTTPError("https://x", 401, "x", {}, None), 502, "upstream_error"),
+    ],
+)
+def test_typhoon_upstream_failures(api, cwa, exc, status, code, capsys):
+    cwa.raises(exc)
+    api("/api/typhoons").assert_error(status, code)
+    # 金鑰在網址裡，log 不可以出現
+    assert "test-key" not in capsys.readouterr().out
+
+
+def test_typhoons_are_cached(cached_api, cwa):
+    cached_api("/api/typhoons")
+    second = cached_api("/api/typhoons")
+    assert second.body["meta"]["source"] == "cache"
+    assert len(cwa.calls) == 1

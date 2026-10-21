@@ -51,6 +51,7 @@ frontend/
       WeatherBackdrop.jsx   動態天氣背景（純裝飾）
       SatelliteMap.jsx      衛星雲圖地圖（Leaflet，延遲載入）
     satellite/frames.js     衛星影像的圖層、時間點與網址
+    typhoon/typhoon.js      颱風路徑畫在地圖上、文字說明
     hooks/useWeatherScene.js        查詢狀態 → 背景場景
     hooks/usePrefersReducedMotion.js 系統的「減少動態效果」設定
     weather/scene.js        WMO 代碼分類、日夜判斷
@@ -189,9 +190,26 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
 | 動畫 | 每個時間點一個圖層，全部先載入，播放時只切換透明度 | 不會一張一張重新下載而閃爍 |
 | 無障礙 | 偏好減少動態效果時不自動播放；滾輪不縮放地圖；時間文字不是 live region | 避免捲動頁面時意外縮放，也避免螢幕閱讀器每 0.6 秒念一次時間 |
 
+### 颱風路徑
+
+雲圖上面再疊一層中央氣象署的颱風資料（`GET /api/typhoons`，後端說明見 [typhoon.md](typhoon.md)）：
+
+| 畫在地圖上 | 樣式 |
+|---|---|
+| 過去路徑 | 白色實線 |
+| 預測路徑（從現在位置連到 24、48… 小時的預測點） | 黃色虛線 |
+| 70% 機率範圍（每個預測點） | 黃色半透明圓 |
+| 7 級風暴風圈（現在） | 紅色半透明圓 |
+| 颱風中心 | 紅點，滑鼠移上去顯示名稱、風速、氣壓、移動方向 |
+
+- 地圖下方用文字再列一次每個颱風的資料，螢幕閱讀器和不方便看地圖的人也看得到。圖例用和地圖一樣的深色底，線條顏色才會一致。
+- 颱風圖層不跟著時間軸切換：氣象署每 3 到 6 小時才發布一次位置，雲圖是最近 2 小時，兩者時間本來就不同。
+- 沒有颱風時顯示「目前沒有颱風或熱帶性低氣壓」；API 失敗（例如還沒設定授權碼的 503）就只顯示雲圖，不顯示錯誤，因為颱風是附加資訊。
+- 畫圖的邏輯放在 `typhoon/typhoon.js`，Leaflet 由元件傳進去，所以可以用假的 Leaflet 測試畫了哪些線和圓。
+
 ## 4. 測試
 
-`npm test` 共 129 個測試，全部是假資料，不會呼叫真的 API：
+`npm test` 共 142 個測試，全部是假資料，不會呼叫真的 API：
 
 | 檔案 | 測什麼 |
 |---|---|
@@ -206,7 +224,9 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
 | `hooks/useWeatherScene.test.js` | 載入中保留上一個背景；失敗回到預設；同一份資料回傳同一個物件 |
 | `App.test.jsx`（新增一個） | 換城市時背景跟著換，查詢失敗回到預設 |
 | `satellite/frames.test.js` | 影像時間（含跨日、跨月、GIBS 的時間格式）、圖磚網址、臺灣時間顯示 |
-| `components/SatelliteMap.test.jsx` | 用假的 Leaflet：地圖只建立一次、每個時間點一個圖層、播放與暫停、拖曳時間軸、減少動態效果時不自動播放、卸載時移除地圖和計時器 |
+| `components/SatelliteMap.test.jsx` | 用假的 Leaflet：地圖只建立一次、每個時間點一個圖層、播放與暫停、拖曳時間軸、減少動態效果時不自動播放、卸載時移除地圖和計時器；颱風畫上地圖並列出文字、沒有颱風的說明、API 失敗時只顯示雲圖、卸載後才回來的資料不會畫 |
+| `typhoon/typhoon.test.js` | 移動方向中文、文字說明（缺欄位會略過）、畫出的線和圓（半徑換成公尺）、沒有歷史或預測時只畫中心、重畫前先清除 |
+| `api/weatherApi.test.js`（新增三個） | `fetchTyphoons` 的網址、沒有 `typhoons` 欄位時回空陣列、503 歸類為伺服器錯誤 |
 
 CI 的 `Frontend` job 在每個 PR 都會執行 `npm ci`、`npm test`、`npm run build`。
 

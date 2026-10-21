@@ -1,8 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import L from 'leaflet'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fetchTyphoons } from '../api/weatherApi.js'
 import { FRAME_COUNT } from '../satellite/frames.js'
+import { TYPHOON } from '../test/fixtures.js'
 import SatelliteMap from './SatelliteMap.jsx'
 
 // jsdom 沒有真的版面和網路，換成假的 Leaflet，只檢查元件怎麼使用它
@@ -19,8 +21,33 @@ vi.mock('leaflet', () => {
       this.opacity = value
     }),
   }))
-  return { default: { map: vi.fn(() => map), tileLayer } }
+  const group = {
+    addTo() {
+      return this
+    },
+    clearLayers() {},
+  }
+  const shape = () => ({
+    bindTooltip() {
+      return this
+    },
+    addTo() {
+      return this
+    },
+  })
+  return {
+    default: {
+      map: vi.fn(() => map),
+      tileLayer,
+      layerGroup: vi.fn(() => group),
+      polyline: vi.fn(shape),
+      circle: vi.fn(shape),
+      circleMarker: vi.fn(shape),
+    },
+  }
 })
+
+vi.mock('../api/weatherApi.js', () => ({ fetchTyphoons: vi.fn() }))
 
 const satelliteLayers = () => L.tileLayer.mock.results.map((r) => r.value).filter((l) => l.url.includes('gibs'))
 const visibleIndex = () => satelliteLayers().findIndex((l) => l.opacity === 1)
@@ -34,6 +61,9 @@ describe('SatelliteMap', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     L.map.mockClear()
     L.tileLayer.mockClear()
+    L.circleMarker.mockClear()
+    fetchTyphoons.mockReset()
+    fetchTyphoons.mockResolvedValue([])
   })
   afterEach(() => vi.useRealTimers())
 
@@ -89,5 +119,41 @@ describe('SatelliteMap', () => {
     unmount()
     expect(map.remove).toHaveBeenCalledTimes(1)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('draws typhoons from the API on top of the clouds and lists them', async () => {
+    stubReducedMotion(true)
+    fetchTyphoons.mockResolvedValue([TYPHOON])
+    render(<SatelliteMap />)
+
+    expect(await screen.findByText(/鳳凰（FUNG-WONG）/)).toBeInTheDocument()
+    await waitFor(() => expect(L.circleMarker).toHaveBeenCalledWith([19, 127], expect.any(Object)))
+    expect(screen.getByText('預測路徑')).toBeInTheDocument()
+  })
+
+  it('says so when there is no typhoon', async () => {
+    stubReducedMotion(true)
+    render(<SatelliteMap />)
+    expect(await screen.findByText('目前沒有颱風或熱帶性低氣壓。')).toBeInTheDocument()
+  })
+
+  it('shows only the clouds when typhoon data is unavailable', async () => {
+    stubReducedMotion(true)
+    fetchTyphoons.mockRejectedValue(new Error('503'))
+    render(<SatelliteMap />)
+    await waitFor(() => expect(fetchTyphoons).toHaveBeenCalled())
+    await act(async () => {})
+    expect(screen.queryByText(/颱風動態/)).not.toBeInTheDocument()
+    expect(L.circleMarker).not.toHaveBeenCalled()
+  })
+
+  it('ignores a typhoon answer that arrives after unmount', async () => {
+    stubReducedMotion(true)
+    let resolve
+    fetchTyphoons.mockReturnValue(new Promise((r) => (resolve = r)))
+    const { unmount } = render(<SatelliteMap />)
+    unmount()
+    await act(async () => resolve([TYPHOON]))
+    expect(L.circleMarker).not.toHaveBeenCalled()
   })
 })
