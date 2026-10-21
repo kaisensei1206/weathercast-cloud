@@ -320,6 +320,11 @@ body {
   background: #e8eaed; /* 圖磚還沒載入前的底色，和淺色底圖一致 */
 }
 
+/* 彩色的 OpenStreetMap 底圖轉成淡灰色；只套用在圖磚，標記和彈出視窗維持原色 */
+.fireworks__map .leaflet-tile-pane {
+  filter: grayscale(1) brightness(1.08) contrast(0.85);
+}
+
 /* 地圖標記：白底圓形加煙火圖示。煙火大會是粗的橘色外圈，可能有煙火是細外圈，已結束變灰。
    Leaflet 的 CSS 比較晚載入，會用 display: block 蓋掉，所以多加 .leaflet-marker-icon 提高優先順序 */
 .leaflet-marker-icon.fw-marker {

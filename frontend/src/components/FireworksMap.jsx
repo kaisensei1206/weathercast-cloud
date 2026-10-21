@@ -18,10 +18,10 @@ const TAIWAN_BOUNDS = [
   [21.8, 118.2],
   [25.4, 122.1],
 ]
-// CARTO 的淺色底圖，和截圖那種灰白地圖相同風格
-const BASE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-const ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+// OpenStreetMap 官方圖磚：不需要金鑰（CARTO 的底圖在 localhost 以外的網域要 API 金鑰）。
+// 用 CSS 把底圖轉成灰色（見 index.css 的 .fireworks__map），橘色的煙火標記比較顯眼
+const BASE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 
 const FILTERS = [
   ['all', '全部'],
@@ -95,7 +95,7 @@ export default function FireworksMap() {
       maxZoom: 15,
       scrollWheelZoom: false, // 捲動頁面時不要意外縮放地圖
     }).fitBounds(TAIWAN_BOUNDS)
-    L.tileLayer(BASE_URL, { attribution: ATTRIBUTION, subdomains: 'abcd', maxZoom: 15 }).addTo(map)
+    L.tileLayer(BASE_URL, { attribution: ATTRIBUTION, maxZoom: 15 }).addTo(map)
     mapRef.current = map
     groupRef.current = L.layerGroup().addTo(map)
     return () => {
