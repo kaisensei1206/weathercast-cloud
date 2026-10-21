@@ -1,4 +1,4 @@
-// 用一個 Canvas 畫雨、雪和星星。
+// 用一個 Canvas 畫雨和雪，疊在背景地圖上。
 //
 // - 引擎只在元件掛上時建立一次；換天氣只呼叫 setConfig，不會重建 Canvas 或重新註冊事件。
 // - 粒子數量依螢幕大小和 CPU 核心數調整，手機和低階裝置畫得比較少。
@@ -7,7 +7,6 @@
 
 const MAX_RAIN = 260
 const MAX_SNOW = 160
-const MAX_STARS = 90
 const REFERENCE_AREA = 1280 * 800
 
 // 三層景深：越遠越細、越慢、越淡
@@ -39,8 +38,7 @@ export function targetCounts(config, budget) {
     precipitation?.type === 'rain' ? Math.round(MAX_RAIN * precipitation.density * budget) : 0
   const snowCount =
     precipitation?.type === 'snow' ? Math.round(MAX_SNOW * precipitation.density * budget) : 0
-  const starCount = config?.stars > 0 ? Math.round(MAX_STARS * budget) : 0
-  return { rain: rainCount, snow: snowCount, stars: starCount }
+  return { rain: rainCount, snow: snowCount }
 }
 
 function pickLayer(layers) {
@@ -73,14 +71,13 @@ export function createParticleEngine(canvas, { reducedMotion = false } = {}) {
   let height = 0
   let budget = 1
   let config = null
-  let targets = { rain: 0, snow: 0, stars: 0 }
+  let targets = { rain: 0, snow: 0 }
   let reduced = reducedMotion
   let frame = 0
   let lastTime = 0
   let elapsed = 0
   const rain = []
   const snow = []
-  const stars = []
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, cores <= 4 ? 1.5 : 2)
@@ -91,7 +88,6 @@ export function createParticleEngine(canvas, { reducedMotion = false } = {}) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     budget = particleBudget({ width, height, cores })
     targets = targetCounts(config, budget)
-    stars.length = 0 // 星星位置跟畫面大小有關，重新撒
     fill(true)
     if (reduced) drawStill()
   }
@@ -122,23 +118,10 @@ export function createParticleEngine(canvas, { reducedMotion = false } = {}) {
     }
   }
 
-  function newStar() {
-    return {
-      x: random(0, width),
-      y: random(0, height * 0.6) ** 1.15 / (height * 0.6) ** 0.15, // 越靠上越密
-      r: random(0.5, 1.4),
-      base: random(0.35, 0.9),
-      phase: random(0, Math.PI * 2),
-      twinkle: random(0.6, 1.6),
-    }
-  }
-
   // 補足不夠的粒子；多出來的不立刻刪掉，等它們落出畫面再回收，避免畫面突然變空
   function fill(anywhere) {
     while (rain.length < targets.rain) rain.push(newRainDrop(anywhere))
     while (snow.length < targets.snow) snow.push(newSnowflake(anywhere))
-    while (stars.length < targets.stars) stars.push(newStar())
-    if (stars.length > targets.stars) stars.length = targets.stars
   }
 
   function updateRain(dt) {
@@ -182,7 +165,7 @@ export function createParticleEngine(canvas, { reducedMotion = false } = {}) {
         ctx.lineTo(drop.x - len * p.wind, drop.y - len)
       }
       ctx.lineWidth = layer.width
-      ctx.strokeStyle = `rgba(210, 225, 240, ${(p.opacity * layer.alpha).toFixed(3)})`
+      ctx.strokeStyle = `rgba(70, 110, 160, ${(p.opacity * layer.alpha).toFixed(3)})`
       ctx.stroke()
     }
   }
@@ -197,28 +180,19 @@ export function createParticleEngine(canvas, { reducedMotion = false } = {}) {
         ctx.moveTo(x + flake.r, flake.y)
         ctx.arc(x, flake.y, flake.r, 0, Math.PI * 2)
       }
-      ctx.fillStyle = `rgba(255, 255, 255, ${(opacity * SNOW_LAYERS[l].alpha).toFixed(3)})`
+      const alpha = opacity * SNOW_LAYERS[l].alpha
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`
       ctx.fill()
+      // 淡淡的深色外框：地圖是淺灰色，只有白色的雪會看不清楚
+      ctx.lineWidth = 0.75
+      ctx.strokeStyle = `rgba(60, 80, 110, ${(alpha * 0.45).toFixed(3)})`
+      ctx.stroke()
     }
-  }
-
-  function drawStars() {
-    const strength = config.stars
-    for (const star of stars) {
-      const twinkle = reduced ? 1 : 0.7 + 0.3 * Math.sin(elapsed * star.twinkle + star.phase)
-      ctx.globalAlpha = Math.min(1, star.base * twinkle * strength)
-      ctx.beginPath()
-      ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2)
-      ctx.fillStyle = '#fff'
-      ctx.fill()
-    }
-    ctx.globalAlpha = 1
   }
 
   function draw() {
     ctx.clearRect(0, 0, width, height)
     if (!config) return
-    if (stars.length) drawStars()
     if (rain.length && config.precipitation?.type === 'rain') drawRain()
     if (snow.length && config.precipitation?.type === 'snow') drawSnow()
   }
@@ -246,7 +220,7 @@ export function createParticleEngine(canvas, { reducedMotion = false } = {}) {
   }
 
   function isAnimating() {
-    return !reduced && !document.hidden && (rain.length > 0 || snow.length > 0 || stars.length > 0)
+    return !reduced && !document.hidden && (rain.length > 0 || snow.length > 0)
   }
 
   function start() {
@@ -293,7 +267,7 @@ export function createParticleEngine(canvas, { reducedMotion = false } = {}) {
   resize()
 
   return {
-    /** @param {{ precipitation: object | null, stars: number }} next */
+    /** @param {{ precipitation: object | null }} next */
     setConfig(next) {
       const typeChanged = next?.precipitation?.type !== config?.precipitation?.type
       config = next

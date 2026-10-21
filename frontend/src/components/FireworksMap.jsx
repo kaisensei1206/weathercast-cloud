@@ -1,6 +1,7 @@
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { fetchFireworks } from '../api/weatherApi.js'
 import {
   KIND_LABELS,
@@ -19,9 +20,22 @@ const TAIWAN_BOUNDS = [
   [25.4, 122.1],
 ]
 // OpenStreetMap 官方圖磚：不需要金鑰（CARTO 的底圖在 localhost 以外的網域要 API 金鑰）。
-// 用 CSS 把底圖轉成灰色（見 index.css 的 .fireworks__map），橘色的煙火標記比較顯眼
+// 用 CSS 把底圖轉成灰色（見 index.css 的 .map-bg），橘色的煙火標記比較顯眼
 const BASE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
 const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+
+// 地圖是整個畫面的背景，有一部分被查詢面板蓋住，數字要和 index.css 的 .app 一致：
+// 桌面的面板在左邊（16px 邊距 + 400px 寬 + 16px 間隔），手機的面板從畫面 45% 的高度開始往下
+const MOBILE_MAX_WIDTH = 720
+const PANEL_SPACE = 432
+const SHEET_RATIO = 0.55
+const EDGE = 24
+
+/** 被面板蓋住的範圍（px）：桌面是左邊，手機是下方。 */
+function coveredArea() {
+  if (window.innerWidth > MOBILE_MAX_WIDTH) return { left: PANEL_SPACE, bottom: 0 }
+  return { left: 0, bottom: Math.round(window.innerHeight * SHEET_RATIO) }
+}
 
 const FILTERS = [
   ['all', '全部'],
@@ -76,6 +90,7 @@ function popupContent(event, status) {
 /**
  * 煙火地圖：今年全臺的煙火相關活動（交通部觀光署開放資料）。
  *
+ * - 地圖是整個網頁的背景：用 portal 放到 <body> 底下，固定佔滿畫面；活動清單留在查詢面板裡。
  * - 地圖只在掛上時建立一次，卸載時 map.remove()。
  * - 標記依篩選條件重畫；點清單裡的活動，地圖移過去並打開說明。
  * - 名稱有煙火的是「煙火大會」，只有說明提到的是「可能有煙火」，用不同樣式區分。
@@ -90,11 +105,20 @@ export default function FireworksMap() {
   const now = useMemo(() => new Date(), [])
 
   useEffect(() => {
+    const { left, bottom } = coveredArea()
+    // 縮放按鈕和資料來源放右上角：左邊（桌面）和下方（手機）會被面板蓋住
     const map = L.map(containerRef.current, {
       minZoom: 6,
       maxZoom: 15,
-      scrollWheelZoom: false, // 捲動頁面時不要意外縮放地圖
-    }).fitBounds(TAIWAN_BOUNDS)
+      zoomSnap: 0.5, // 手機畫面窄，允許半級縮放，全臺才不會縮得太小
+      zoomControl: false,
+      attributionControl: false,
+    }).fitBounds(TAIWAN_BOUNDS, {
+      paddingTopLeft: [left + EDGE, EDGE],
+      paddingBottomRight: [EDGE, bottom + EDGE],
+    })
+    L.control.attribution({ position: 'topright' }).addTo(map)
+    L.control.zoom({ position: 'topright' }).addTo(map)
     L.tileLayer(BASE_URL, { attribution: ATTRIBUTION, maxZoom: 15 }).addTo(map)
     mapRef.current = map
     groupRef.current = L.layerGroup().addTo(map)
@@ -137,10 +161,16 @@ export default function FireworksMap() {
     }
   }, [visible, now])
 
+  // 點清單：地圖飛到活動位置，讓標記落在「沒被面板蓋住」那一塊的中間
   function focus(event) {
-    const marker = markersRef.current.get(event.id)
-    mapRef.current?.flyTo([event.lat, event.lon], 11, { duration: 0.6 })
-    marker?.openPopup()
+    const map = mapRef.current
+    if (!map) return
+    const zoom = 11
+    const { left, bottom } = coveredArea()
+    const center = map.project([event.lat, event.lon], zoom).subtract([left / 2, -bottom / 2])
+    map.flyTo(map.unproject(center, zoom), zoom, { duration: 0.6 })
+    markersRef.current.get(event.id)?.openPopup()
+    if (bottom) window.scrollTo({ top: 0, behavior: 'smooth' }) // 手機：捲回最上面，才看得到地圖
   }
 
   const year = state.data?.year
@@ -153,16 +183,19 @@ export default function FireworksMap() {
           煙火地圖
         </h2>
         <p className="fireworks__sub">
-          {year ? `${year} 年` : '今年'}全臺的煙火活動，資料來自交通部觀光署，每天更新
+          {year ? `${year} 年` : '今年'}全臺的煙火活動，點活動看位置。資料來自交通部觀光署，每天更新
         </p>
       </div>
 
-      <div
-        ref={containerRef}
-        className="fireworks__map"
-        role="region"
-        aria-label="煙火活動地圖，可以拖曳和縮放"
-      />
+      {createPortal(
+        <div
+          ref={containerRef}
+          className="map-bg"
+          role="region"
+          aria-label="煙火活動地圖，可以拖曳和縮放"
+        />,
+        document.body,
+      )}
 
       {state.status === 'loading' && <p className="fireworks__note">載入活動中…</p>}
       {state.status === 'error' && (

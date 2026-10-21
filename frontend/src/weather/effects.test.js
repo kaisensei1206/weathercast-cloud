@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getEffects, skyTone } from './effects.js'
+import { getEffects } from './effects.js'
 import { IDLE_SCENE, classifyCode } from './scene.js'
 
 const scene = (code, night = false) => ({ ...classifyCode(code), night })
@@ -18,30 +18,22 @@ const KINDS = {
 }
 
 describe('getEffects', () => {
-  it.each(Object.entries(KINDS))('gives %s its own sky by day and by night', (_, code) => {
+  it.each(Object.entries(KINDS))('darkens the map more at night for %s', (_, code) => {
     const day = getEffects(scene(code))
     const night = getEffects(scene(code, true))
-    expect(day.skyTop).toMatch(/^#[0-9a-f]{6}$/)
-    expect(night.skyTop).not.toBe(day.skyTop)
-    expect(day.tone).toBe('dark')
+    expect(night.shade).toBeGreaterThan(day.shade)
   })
 
-  it('uses a different sky for every kind', () => {
-    const skies = Object.values(KINDS).map((code) => getEffects(scene(code)).skyTop)
-    expect(new Set(skies).size).toBe(skies.length)
-  })
-
-  it('shows the sun on clear days and the moon and stars on clear nights', () => {
-    expect(getEffects(scene(0))).toMatchObject({ sun: 1, moon: 0, stars: 0 })
-    expect(getEffects(scene(0, true))).toMatchObject({ sun: 0, moon: 1, stars: 1 })
+  it('leaves the map untouched on clear days and darkens it in bad weather', () => {
+    expect(getEffects(scene(0)).shade).toBe(0)
+    expect(getEffects(scene(63)).shade).toBeGreaterThan(getEffects(scene(2)).shade)
+    expect(getEffects(scene(95)).shade).toBeGreaterThan(getEffects(scene(63)).shade)
   })
 
   it('makes overcast visibly heavier than cloudy', () => {
     const cloudy = getEffects(scene(2))
     const overcast = getEffects(scene(3))
     expect(overcast.clouds).toBeGreaterThan(cloudy.clouds + 0.3)
-    expect(overcast.sun).toBe(0)
-    expect(cloudy.sun).toBeGreaterThan(0)
     expect(overcast.fog).toBeGreaterThan(0)
   })
 
@@ -74,16 +66,17 @@ describe('getEffects', () => {
     expect(getEffects(scene(45)).fog).toBeLessThan(getEffects(scene(48)).fog)
   })
 
-  it.each([IDLE_SCENE, undefined, null, { kind: 'nonsense' }])(
-    'falls back to the plain page for %j',
+  it.each([IDLE_SCENE, undefined, null, { kind: 'nonsense' }, { kind: 'toString' }])(
+    'shows the plain map for %j',
     (value) => {
-      expect(getEffects(value)).toMatchObject({
-        skyTop: null,
-        tone: null,
+      expect(getEffects(value)).toEqual({
+        shade: 0,
+        clouds: 0,
+        cloudShade: 'light',
+        fog: 0,
         precipitation: null,
         lightning: false,
       })
-      expect(skyTone(value)).toBeNull()
     },
   )
 
@@ -91,7 +84,7 @@ describe('getEffects', () => {
     for (const code of Object.values(KINDS)) {
       for (const night of [false, true]) {
         const effects = getEffects(scene(code, night))
-        for (const key of ['sun', 'moon', 'stars', 'clouds', 'fog']) {
+        for (const key of ['shade', 'clouds', 'fog']) {
           expect(effects[key]).toBeGreaterThanOrEqual(0)
           expect(effects[key]).toBeLessThanOrEqual(1)
         }

@@ -19,16 +19,15 @@ describe('particleBudget', () => {
 describe('targetCounts', () => {
   it('counts only the active precipitation type', () => {
     const rain = { type: 'rain', density: 1 }
-    expect(targetCounts({ precipitation: rain, stars: 0 }, 1)).toEqual({ rain: 260, snow: 0, stars: 0 })
-    expect(targetCounts({ precipitation: { type: 'snow', density: 0.5 }, stars: 1 }, 0.5)).toEqual({
+    expect(targetCounts({ precipitation: rain }, 1)).toEqual({ rain: 260, snow: 0 })
+    expect(targetCounts({ precipitation: { type: 'snow', density: 0.5 } }, 0.5)).toEqual({
       rain: 0,
       snow: 40,
-      stars: 45,
     })
   })
 
   it('returns zero for no config', () => {
-    expect(targetCounts(null, 1)).toEqual({ rain: 0, snow: 0, stars: 0 })
+    expect(targetCounts(null, 1)).toEqual({ rain: 0, snow: 0 })
   })
 })
 
@@ -52,7 +51,7 @@ describe('createParticleEngine', () => {
   it('does nothing when canvas is not supported', () => {
     const engine = createParticleEngine({ getContext: () => null })
     expect(() => {
-      engine.setConfig({ precipitation: { type: 'rain', density: 1 }, stars: 0 })
+      engine.setConfig({ precipitation: { type: 'rain', density: 1 } })
       engine.setReducedMotion(true)
       engine.destroy()
     }).not.toThrow()
@@ -69,8 +68,8 @@ describe('createParticleEngine', () => {
 
     const engine = createParticleEngine(canvas)
     const rain = { type: 'rain', density: 1, speed: 1, length: 1, opacity: 0.5, wind: 0.1 }
-    engine.setConfig({ precipitation: rain, stars: 0 })
-    engine.setConfig({ precipitation: { ...rain, density: 0.5 }, stars: 0 })
+    engine.setConfig({ precipitation: rain })
+    engine.setConfig({ precipitation: { ...rain, density: 0.5 } })
     expect(raf).toHaveBeenCalledTimes(1) // 換設定不會多開一個迴圈
 
     engine.destroy()
@@ -88,7 +87,6 @@ describe('createParticleEngine', () => {
     const engine = createParticleEngine(canvas, { reducedMotion: true })
     engine.setConfig({
       precipitation: { type: 'snow', density: 1, speed: 0.5, opacity: 0.8 },
-      stars: 0,
     })
     expect(raf).not.toHaveBeenCalled()
     expect(ctx.arc).toHaveBeenCalled()
@@ -103,9 +101,9 @@ describe('createParticleEngine', () => {
     const { canvas } = fakeCanvas()
 
     const engine = createParticleEngine(canvas)
-    engine.setConfig({ precipitation: null, stars: 1 })
+    engine.setConfig({ precipitation: { type: 'rain', density: 1, speed: 1, length: 1, opacity: 0.5, wind: 0 } })
     expect(raf).toHaveBeenCalledTimes(1)
-    engine.setConfig({ precipitation: null, stars: 0 })
+    engine.setConfig({ precipitation: null })
     expect(caf).toHaveBeenCalledWith(7)
     engine.destroy()
   })
