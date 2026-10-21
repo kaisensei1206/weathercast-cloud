@@ -12,6 +12,9 @@ vi.mock('./api/weatherApi.js', async (importOriginal) => ({
   fetchWeather: vi.fn(),
 }))
 
+// 地圖有自己的測試（components/SatelliteMap.test.jsx）；這裡換成空元件，不在 jsdom 裡建立 Leaflet
+vi.mock('./components/SatelliteMap.jsx', () => ({ default: () => null }))
+
 function deferred() {
   let resolve
   const promise = new Promise((r) => {

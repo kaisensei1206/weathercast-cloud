@@ -49,6 +49,8 @@ frontend/
       WeatherCard.jsx       天氣卡
       StatusMessage.jsx     載入中與錯誤訊息
       WeatherBackdrop.jsx   動態天氣背景（純裝飾）
+      SatelliteMap.jsx      衛星雲圖地圖（Leaflet，延遲載入）
+    satellite/frames.js     衛星影像的圖層、時間點與網址
     hooks/useWeatherScene.js        查詢狀態 → 背景場景
     hooks/usePrefersReducedMotion.js 系統的「減少動態效果」設定
     weather/scene.js        WMO 代碼分類、日夜判斷
@@ -172,9 +174,24 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
   - 不閃電；
   - 雨和雪只畫一張靜態畫面，仍然看得出天氣。
 
+### 衛星雲圖
+
+首頁下方有一張可以拖曳、縮放的地圖，播放向日葵衛星最近 2 小時的紅外線雲圖，颱風的螺旋雲帶和颱風眼都看得到。
+
+| 項目 | 做法 | 原因 |
+|---|---|---|
+| 地圖套件 | Leaflet 1.9（gzip 後約 45 KB），直接使用，不加 `react-leaflet` | 少一層套件；地圖只在 `useEffect` 建立一次，卸載時 `map.remove()` |
+| 延遲載入 | `React.lazy` 拆成另一個檔案 | 首頁的 JS 大小不變，地圖等畫面出來後才下載 |
+| 衛星影像 | NASA GIBS 的 `Himawari_AHI_Band13_Clean_Infrared`，WMTS 圖磚 | 免費、不用金鑰、有 CORS。瀏覽器直接下載，不經過 Lambda，不增加 AWS 費用 |
+| 底圖 | CARTO 深色底圖，雲圖用 `mix-blend-mode: screen` 疊上去 | 紅外線影像裡暗的地面和海面會消失，只留下亮的雲 |
+| 時間 | 現在減 70 分鐘，往前取 12 張、每 10 分鐘一張 | 2026-10-21 實測 GIBS 的最新影像約晚 55 分鐘；太新的時間會拿到空白圖磚 |
+| 縮放 | 圖磚最多到 zoom 6（`maxNativeZoom`），地圖可以放大到 7 | GIBS 這個圖層只有到 Level 6，zoom 7 會回 400 |
+| 動畫 | 每個時間點一個圖層，全部先載入，播放時只切換透明度 | 不會一張一張重新下載而閃爍 |
+| 無障礙 | 偏好減少動態效果時不自動播放；滾輪不縮放地圖；時間文字不是 live region | 避免捲動頁面時意外縮放，也避免螢幕閱讀器每 0.6 秒念一次時間 |
+
 ## 4. 測試
 
-`npm test` 共 119 個測試，全部是假資料，不會呼叫真的 API：
+`npm test` 共 129 個測試，全部是假資料，不會呼叫真的 API：
 
 | 檔案 | 測什麼 |
 |---|---|
@@ -188,6 +205,8 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
 | `components/WeatherBackdrop.test.jsx` | `aria-hidden`；換天氣更新 CSS 變數；沒有 Canvas 和 `matchMedia` 也不會出錯；閃電計時器在換天氣、卸載、開啟減少動態效果時都會清掉 |
 | `hooks/useWeatherScene.test.js` | 載入中保留上一個背景；失敗回到預設；同一份資料回傳同一個物件 |
 | `App.test.jsx`（新增一個） | 換城市時背景跟著換，查詢失敗回到預設 |
+| `satellite/frames.test.js` | 影像時間（含跨日、跨月、GIBS 的時間格式）、圖磚網址、臺灣時間顯示 |
+| `components/SatelliteMap.test.jsx` | 用假的 Leaflet：地圖只建立一次、每個時間點一個圖層、播放與暫停、拖曳時間軸、減少動態效果時不自動播放、卸載時移除地圖和計時器 |
 
 CI 的 `Frontend` job 在每個 PR 都會執行 `npm ci`、`npm test`、`npm run build`。
 

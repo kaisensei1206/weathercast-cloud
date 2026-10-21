@@ -264,6 +264,69 @@ body {
   color: var(--muted);
 }
 
+/* 衛星雲圖（components/SatelliteMap.jsx） */
+.satellite {
+  margin-top: 20px;
+}
+
+.satellite__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.satellite__header .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.satellite__title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.satellite__sub {
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.satellite__map {
+  height: 380px;
+  border-radius: 10px;
+  background: #0b0f17; /* 圖磚還沒載入前的底色，和深色底圖一致 */
+}
+
+/* 紅外線影像暗的部分（地面、海面）在 screen 混合下會消失，只留下亮的雲 */
+.satellite__frame {
+  mix-blend-mode: screen;
+}
+
+.satellite__map .leaflet-tile-pane .satellite__frame {
+  transition: opacity 0.25s linear;
+}
+
+.satellite__timeline {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.satellite__timeline input {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.satellite__time {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 /* 載入與錯誤 */
 .status {
   margin: 0;
@@ -621,5 +684,9 @@ body {
 
   .card__temp-value {
     font-size: 3.25rem;
+  }
+
+  .satellite__map {
+    height: 300px;
   }
 }
