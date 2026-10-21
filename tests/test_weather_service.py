@@ -246,7 +246,21 @@ def test_missing_table_falls_back_to_upstream(capsys):
         result = query(cache, Upstream(), NOW)
 
     assert result["meta"]["source"] == "upstream"
-    assert log_messages(capsys) == ["cache_read_failed", "cache_write_failed"]
+    # 寫入時斷路器已經打開，不會再試一次 DynamoDB，所以 dynamodb_error 只有一筆
+    assert log_messages(capsys) == ["dynamodb_error", "cache_read_failed", "cache_write_failed"]
+
+
+def test_dynamodb_outage_does_not_send_every_request_upstream(capsys):
+    # 快取故障時，同一個 Lambda 實例 10 分鐘內只向上游查一次，其他請求用記憶體裡的資料
+    cache = WeatherCache(boto3.resource("dynamodb").Table("table-that-does-not-exist"))
+    upstream = Upstream()
+    with mock_aws():
+        first = query(cache, upstream, NOW)
+        later = [query(cache, upstream, NOW + 60 * i) for i in range(1, 10)]
+
+    assert upstream.calls == 1
+    assert first["meta"]["source"] == "upstream"
+    assert {r["meta"]["source"] for r in later} == {"cache"}
 
 
 @pytest.mark.parametrize("bad_query", [None, "   ", "x" * 51, "Tokyo"])

@@ -46,7 +46,11 @@ DynamoDB TTL 刪除不是即時的，通常在過期後幾天內才刪除，不�
 
 快取只是加速手段，不是資料來源，所以採用 **fail-open**：DynamoDB 讀寫失敗（逾時、權限、資料表不存在、資料損壞）只記 error log，照樣呼叫 Open-Meteo 回應使用者。
 
-- 代價：快取故障期間，每個請求都會呼叫 Open-Meteo。API Gateway 的節流設定會限制請求量，保護上游並控制費用。
+- 代價：如果只做 fail-open，快取故障期間每個請求都會呼叫 Open-Meteo，上游流量會被放大。所以另外加了兩層保護（`backend/src/weather_cache.py`）：
+  - **記憶體備援**：每次成功讀寫 DynamoDB 的資料，也存一份在 Lambda 的記憶體裡。DynamoDB 讀不到時，改用記憶體裡的資料，新鮮期、保留期的判斷完全一樣。同一個 Lambda 執行環境裡，每個城市每 10 分鐘最多呼叫 Open-Meteo 一次，和快取正常時相同。
+  - **斷路器**：DynamoDB 讀寫失敗一次後，30 秒內直接跳過 DynamoDB，不再等它逾時。這段時間的請求不用多等 1 到 2 秒，DynamoDB 恢復後最多 30 秒就會重新使用。資料表裡的資料損壞不算 DynamoDB 故障，不會打開斷路器。
+  - 限制：記憶體是每個 Lambda 執行環境各自一份。同時有 N 個執行環境時，上游呼叫最多是正常時的 N 倍；冷啟動後記憶體是空的。API Gateway 的節流仍然是總量的上限。
+- 監控：DynamoDB 失敗會記 `dynamodb_error` log，CloudWatch 會轉成 `DynamoDBErrors` 指標並發出告警；快取命中率可以用 `CacheHits`、`CacheMisses` 兩個指標算出來。見 [monitoring.md](monitoring.md)。
 - boto3 預設逾時是 60 秒。這裡設成連線 1 秒、讀取 1 秒，而且不重試。最壞情況是讀 2 秒、Open-Meteo 3 秒、寫 2 秒，仍在 Lambda 的 10 秒逾時內。
 
 ## 設定

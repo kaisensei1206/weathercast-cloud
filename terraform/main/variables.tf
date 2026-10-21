@@ -106,3 +106,47 @@ variable "cors_allow_origins" {
     error_message = "不要使用 \"*\"，請列出明確的網址。"
   }
 }
+
+variable "fireworks_throttle_rate_limit" {
+  description = "/api/fireworks 每秒平均請求上限；這條路由的回應最大，也是唯一會下載 zip 的上游，所以比其他路由低"
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.fireworks_throttle_rate_limit > 0 && var.fireworks_throttle_rate_limit <= var.api_throttle_rate_limit
+    error_message = "fireworks_throttle_rate_limit 必須大於 0，且不能超過 api_throttle_rate_limit。"
+  }
+}
+
+variable "fireworks_throttle_burst_limit" {
+  description = "/api/fireworks 瞬間可接受的請求數"
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.fireworks_throttle_burst_limit > 0 && var.fireworks_throttle_burst_limit <= var.api_throttle_burst_limit
+    error_message = "fireworks_throttle_burst_limit 必須大於 0，且不能超過 api_throttle_burst_limit。"
+  }
+}
+
+variable "alarm_requests_per_5min" {
+  description = "請求量突增告警：5 分鐘內的請求數達到多少就通知。節流上限 10 次/秒 = 5 分鐘最多 3000 次，預設是一半"
+  type        = number
+  default     = 1500
+
+  validation {
+    condition     = var.alarm_requests_per_5min > 0
+    error_message = "alarm_requests_per_5min 必須大於 0。"
+  }
+}
+
+variable "alarm_5xx_per_5min" {
+  description = "5 分鐘內有幾個 5xx 就通知；偶爾一次上游逾時不用叫人"
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.alarm_5xx_per_5min > 0
+    error_message = "alarm_5xx_per_5min 必須大於 0。"
+  }
+}

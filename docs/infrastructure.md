@@ -4,7 +4,7 @@
 
 | 資料夾 | 內容 | state 放在哪 | 誰執行 |
 |---|---|---|---|
-| `terraform/bootstrap/` | 存放 state 的 S3 bucket（第八階段會加上 GitHub OIDC 與部署角色） | 本機 local state | 人手動執行一次 |
+| `terraform/bootstrap/` | 存放 state 的 S3 bucket、GitHub OIDC 與部署角色 | 本機 local state | 人手動執行一次 |
 | `terraform/main/` | API 需要的所有資源 | bootstrap 建立的 S3 bucket | 人或 GitHub Actions |
 
 分兩層的原因：主 stack 的 state 要放在 S3，但那個 bucket 本身也得有人建立。先用 bootstrap 建好 bucket，主 stack 才有地方存 state。
@@ -23,8 +23,11 @@
 | `aws_apigatewayv2_integration.lambda` | Lambda proxy 整合，payload 2.0 |
 | `aws_apigatewayv2_route.routes` | `GET /api/health`、`GET /api/cities`、`GET /api/weather`、`GET /api/fireworks`，其他路徑直接 404 |
 | `aws_cloudwatch_log_group.api_access` | API Gateway 存取紀錄，保留 14 天 |
-| `aws_apigatewayv2_stage.default` | `$default` stage，自動部署，節流每秒 10 次、瞬間 20 次，並寫入存取紀錄 |
+| `aws_apigatewayv2_stage.default` | `$default` stage，自動部署，節流每秒 10 次、瞬間 20 次（`/api/fireworks` 另外調成每秒 2 次、瞬間 5 次），並寫入存取紀錄 |
 | `aws_lambda_permission.apigw` | 允許這個 API 呼叫 Lambda |
+| `aws_sns_topic.alerts` | 告警通知；email 訂閱用 AWS CLI 加，不在 Terraform 裡 |
+| `aws_cloudwatch_log_metric_filter.app` | 把 Lambda 的 JSON log 轉成 4 個指標：上游失敗、DynamoDB 錯誤、快取命中、快取未命中 |
+| `aws_cloudwatch_metric_alarm.alarms` | 7 個告警，見 [monitoring.md](monitoring.md) |
 
 ## 依賴關係
 

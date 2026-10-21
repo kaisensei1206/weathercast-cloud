@@ -44,3 +44,8 @@ output "cloudfront_distribution_id" {
   description = "CD 部署後清除 CloudFront 快取用"
   value       = aws_cloudfront_distribution.frontend.id
 }
+
+output "alerts_topic_arn" {
+  description = "告警的 SNS topic；用 aws sns subscribe 加上 email 訂閱（docs/monitoring.md）"
+  value       = aws_sns_topic.alerts.arn
+}

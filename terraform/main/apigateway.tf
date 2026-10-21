@@ -47,10 +47,17 @@ resource "aws_apigatewayv2_stage" "default" {
   name        = "$default" # 網址不帶 stage 名稱
   auto_deploy = true       # 路由或整合變更後自動生效，不用另外建 deployment
 
-  # 費用防線：超過就回 429，不會執行 Lambda
+  # 費用防線：超過就回 429，不會執行 Lambda。這是全部使用者共用的上限，不是每個人的配額
   default_route_settings {
     throttling_rate_limit  = var.api_throttle_rate_limit
     throttling_burst_limit = var.api_throttle_burst_limit
+  }
+
+  # 煙火路由另外調低：回應最大，快取過期時還要下載整個觀光署的 zip
+  route_settings {
+    route_key              = "GET /api/fireworks"
+    throttling_rate_limit  = var.fireworks_throttle_rate_limit
+    throttling_burst_limit = var.fireworks_throttle_burst_limit
   }
 
   access_log_settings {
@@ -65,6 +72,9 @@ resource "aws_apigatewayv2_stage" "default" {
       lambdaStatus     = "$context.integration.status"
     })
   }
+
+  # route_settings 指定的路由要先存在
+  depends_on = [aws_apigatewayv2_route.routes]
 }
 
 # 允許「這個 API」呼叫 Lambda；沒有這個，API Gateway 會回 500
