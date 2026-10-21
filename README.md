@@ -1,6 +1,6 @@
 # WeatherCast Cloud API
 
-> 後端 API 已部署在 AWS（ap-northeast-1），合併到 main 會由 GitHub Actions 自動部署。前端目前在本機執行。
+> 後端 API 已部署在 AWS（ap-northeast-1），合併到 main 會由 GitHub Actions 自動部署。前端透過 S3 + CloudFront 上線的 Terraform 已完成，要在本機 apply 一次才會建立（見 docs/frontend.md 第 5 節）。
 
 查詢台灣 22 縣市目前天氣的 Serverless API。後端使用 Python，透過 Open-Meteo 取得氣象資料，部署在 AWS，所有雲端資源以 Terraform 管理，並用 GitHub Actions 自動測試與部署。
 
@@ -79,7 +79,7 @@ DynamoDB 故障時只記 log，照樣查 Open-Meteo，使用者不受影響。
 - DynamoDB 快取：減少重複呼叫外部 API；外部 API 失敗時回傳較舊的資料並標示
 - React 前端：輸入或選擇縣市並顯示天氣
 
-## 預定架構
+## 架構
 
 ```mermaid
 flowchart LR
@@ -167,7 +167,7 @@ npm test
 npm run build
 ```
 
-結構、設計決策、測試，以及部署到 S3 + CloudFront（私有 bucket + OAC）的 Terraform 設計建議，見 [docs/frontend.md](docs/frontend.md)。
+結構、設計決策、測試，以及部署到 S3 + CloudFront（私有 bucket + OAC，`/api/*` 轉給 API Gateway）的方式，見 [docs/frontend.md](docs/frontend.md)。
 
 ## 部署
 
@@ -185,4 +185,5 @@ npm run build
 - [x] Terraform
 - [x] 部署手冊與實際部署（2026-10-19 上線）
 - [x] GitHub Actions CI/CD（啟用步驟見 docs/cicd.md）
-- [x] React 前端（本機可執行；S3 + CloudFront 部署為設計建議，見 docs/frontend.md）
+- [x] React 前端與動態天氣背景
+- [x] 前端部署：S3 + CloudFront（Terraform 與 CD 已完成，見 docs/frontend.md 第 5 節）

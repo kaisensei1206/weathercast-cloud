@@ -1,18 +1,22 @@
 # CI/CD：GitHub Actions 測試與自動部署
 
-workflow 在 [`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml)，一個檔案、兩個 job：
+workflow 在 [`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml)，一個檔案、三個 job：
 
 | Job | 什麼時候跑 | 做什麼 | AWS 權限 |
 |---|---|---|---|
 | `test` | 每個 PR、每次 push 到 main | ruff、pytest、`terraform fmt`、`terraform validate` | 沒有 |
-| `deploy` | push 到 main（合併 PR）或手動觸發，而且 `test` 通過 | OIDC 登入 AWS → plan → 檢查 plan → apply → 冒煙測試 | 只能更新既有的 Lambda |
+| `frontend` | 每個 PR、每次 push 到 main | `npm ci`、`npm test`、`npm run build` | 沒有 |
+| `deploy` | push 到 main（合併 PR）或手動觸發，而且 `test`、`frontend` 都通過 | OIDC 登入 AWS → plan → 檢查 plan → apply → 上傳前端 → 清除 CloudFront 快取 → 冒煙測試 | 只能更新既有的 Lambda、上傳到既有的前端 bucket、清除快取 |
 
 ```
 PR ──► test ──► (不部署)
 
-main ─► test ──► deploy: OIDC 換臨時憑證 ─► terraform plan ─► check_plan.py ─► terraform apply ─► smoke_test.py
-          │                                                       │                                     │
-       失敗就停                                    改到 Lambda 以外的資源就停              線上 API 不正常就標示失敗
+main ─► test + frontend ──► deploy: OIDC 換臨時憑證 ─► terraform plan ─► check_plan.py ─► terraform apply
+          │                                                                │
+       失敗就停                                             改到 Lambda 以外的資源就停
+                                   ─► build 前端 ─► s3 sync ─► CloudFront invalidation ─► smoke_test.py
+                                                                                              │
+                                                                       API 或網站不正常就標示失敗
 ```
 
 ## 1. 每個 job 做什麼
@@ -30,7 +34,7 @@ main ─► test ──► deploy: OIDC 換臨時憑證 ─► terraform plan �
 
 ### deploy
 
-- `needs: test`：`test` 失敗，`deploy` 不會執行。
+- `needs: [test, frontend]`：任何一個失敗，`deploy` 不會執行。
 - `if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'`：PR 永遠不部署。
 - `concurrency: deploy-production`、`cancel-in-progress: false`：連續合併兩個 PR 時，第二次部署排隊，不會中斷正在 apply 的那一次（中斷 apply 可能留下鎖或不完整的 state）。
 
@@ -43,7 +47,11 @@ main ─► test ──► deploy: OIDC 換臨時憑證 ─► terraform plan �
 | Terraform plan | `archive_file` 重新打包 `backend/src`，和線上版本比較 |
 | Check plan only updates Lambda | `scripts/check_plan.py` 讀 `terraform show -json` 的結果，只允許「沒有變更」或「`aws_lambda_function.api` update」，其他變更一律停止 |
 | Terraform apply | 套用剛剛檢查過的那份 plan 檔，不會重新計算 |
-| Smoke test | `scripts/smoke_test.py` 打 `/api/health` 和 `/api/weather?city=Tainan`，檢查狀態碼和內容；失敗會每 3 秒重試，最多 5 次 |
+| Read Terraform outputs | 讀出 API 網址、前端網址、bucket 名稱和 distribution ID，給後面的步驟用 |
+| Build frontend | `npm ci && npm run build`，不設定 `VITE_API_BASE_URL`，前端用相對路徑 `/api` |
+| Upload frontend to S3 | 先傳 `assets/`（永久快取），再傳 `index.html` 等其他檔案（`no-cache`），見 [frontend.md](frontend.md) 第 5 節 |
+| Invalidate CloudFront cache | 清除 `/` 和 `/index.html` 的快取 |
+| Smoke test | `scripts/smoke_test.py` 打 `/api/health` 和 `/api/weather?city=Tainan`，檢查狀態碼和內容；再對 CloudFront 網址加上 `--frontend` 跑一次，多檢查首頁。失敗會每 3 秒重試，最多 5 次 |
 
 成功或失敗會顯示在 GitHub 的 Actions 頁面、PR 合併後的 commit 旁（綠勾或紅叉），GitHub 也會寄 email 通知 workflow 失敗。
 
@@ -52,7 +60,7 @@ main ─► test ──► deploy: OIDC 換臨時憑證 ─► terraform plan �
 | 誰 | 負責 | 用什麼權限 |
 |---|---|---|
 | 人，在本機 | 建立、修改、刪除基礎設施（加資料表、改 IAM、改路由、bootstrap） | 自己的 AWS 登入（`aws login`） |
-| GitHub Actions | 把 main 上的新版程式碼部署到「已經存在」的 Lambda | OIDC 部署角色，只能更新那一個 Lambda |
+| GitHub Actions | 把 main 上的新版程式碼部署到「已經存在」的 Lambda，把前端上傳到「已經存在」的 bucket | OIDC 部署角色，只能更新那一個 Lambda、寫入那一個 bucket、清除 CloudFront 快取 |
 
 兩邊都用 `terraform apply`，不用 `aws lambda update-function-code`。只有 Terraform 會改 Lambda 的程式碼，state 裡記的 hash 就永遠和線上一致，不會發生「CI 上傳新版、下次本機 apply 又蓋回舊版」的 State Drift（見 [infrastructure.md](infrastructure.md)）。
 
@@ -122,15 +130,19 @@ GitHub 和 repo 裡都沒有任何 AWS 金鑰。repo 變數 `AWS_DEPLOY_ROLE_ARN
 | 讀取 | `iam:GetRole`、`GetRolePolicy`、`ListRolePolicies`、`ListAttachedRolePolicies` | `weathercast-lambda` 角色 | 同上 |
 | 讀取 | `logs:DescribeLogGroups`、`ListTagsForResource`、`ListTagsLogGroup` | 兩個 log group | 同上；`DescribeLogGroups` 是列表 API，只能授權到 `log-group:*` |
 | 讀取 | `apigateway:GET` | 這個 Region 的 `/apis/*` | 同上；API ID 是主 stack 建立時才產生，無法事先寫死 |
-| **寫入** | `lambda:UpdateFunctionCode`、`UpdateFunctionConfiguration` | `weathercast-api` | 唯一會改變線上服務的權限 |
+| 讀取 | `s3:GetBucket*`、`ListBucket` 等 | `weathercast-frontend-<帳號 ID>` | plan 讀 bucket 設定；`aws s3 sync` 比對檔案 |
+| 讀取 | `cloudfront:GetDistribution`、`GetDistributionConfig`、`ListTagsForResource`、`GetOriginAccessControl` | 這個帳號的 distribution 和 OAC | plan 讀設定；ID 是主 stack 建立時才產生 |
+| **寫入** | `lambda:UpdateFunctionCode`、`UpdateFunctionConfiguration` | `weathercast-api` | 更新後端程式碼 |
+| **寫入** | `s3:PutObject`、`DeleteObject` | `weathercast-frontend-<帳號 ID>/*` | 上傳前端、刪除舊檔 |
+| **寫入** | `cloudfront:CreateInvalidation` | 這個帳號的 distribution | 部署後清除快取 |
 
 刻意沒有的權限：
 
-- 任何 `Create*`、`Delete*`、`Put*`（state 檔的 `PutObject`、`DeleteObject` 除外）：不能建立或刪除資源。
+- 任何建立或刪除資源的權限：`Create*`、`Delete*`、`Put*` 只有上表列出的幾個例外（state 檔和前端檔案的 `PutObject`、`DeleteObject`，以及 `CreateInvalidation`），都是寫入「檔案」或「快取」，不是建立 AWS 資源。
 - `iam:PassRole`、任何 IAM 寫入：不能把 Lambda 換成權限更大的角色，也不能替自己加權限。
 - bootstrap 的 state：它只存在你的電腦上，CI 碰不到 bootstrap，所以也不能改自己的信任政策或權限。
 
-`tests/test_ci_cd.py` 會檢查 policy 裡的寫入動作正好是上表那四個，沒有 `*` 和 `iam:PassRole`；也檢查 workflow 沒有使用 secrets 或 Access Key、`test` job 不能要 OIDC token、`deploy` 必須等 `test` 而且不在 PR 執行。
+`tests/test_ci_cd.py` 會檢查 policy 裡的寫入動作正好是上表那五個，S3 寫入只能落在 state 的 key 和前端 bucket，沒有 `*` 和 `iam:PassRole`；也檢查 workflow 沒有使用 secrets 或 Access Key、只有 `deploy` 能要 OIDC token、`deploy` 必須等 `test` 和 `frontend` 而且不在 PR 執行、先傳 assets 再傳 `index.html`。
 
 讀取權限是照 Terraform AWS provider 刷新這些資源時會呼叫的 API 整理的，還沒在真實 AWS 跑過。第一次部署如果出現 `AccessDenied`，錯誤訊息會寫出缺少的動作，補進 `github_oidc.tf` 後在本機 apply bootstrap 即可。
 

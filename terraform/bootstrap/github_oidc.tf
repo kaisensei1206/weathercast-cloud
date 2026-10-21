@@ -1,7 +1,7 @@
 # GitHub Actions 用 OIDC 換取 AWS 臨時憑證，不需要在 GitHub 存放長期金鑰。
 #
-# 部署角色只做一件事：把新版程式碼更新到「已經存在」的 Lambda。
-# 它可以讀取主 stack 的資源（terraform plan 需要），但不能建立、刪除任何資源，也不能改 IAM。
+# 部署角色只做兩件事：把新版程式碼更新到「已經存在」的 Lambda，以及把前端檔案上傳到「已經存在」的 S3 bucket
+# 並清除 CloudFront 快取。它可以讀取主 stack 的資源（terraform plan 需要），但不能建立、刪除任何資源，也不能改 IAM。
 # 新增或修改基礎設施（例如加資料表、改權限）仍由人在本機執行 terraform apply。
 
 # GitHub 的 OIDC 身分提供者，整個帳號只需要一個
@@ -52,6 +52,11 @@ locals {
   arn_prefix   = "${var.region}:${local.account_id}"
   function_arn = "arn:aws:lambda:${local.arn_prefix}:function:${var.project_name}-api"
   log_groups   = ["/aws/lambda/${var.project_name}-api", "/aws/apigateway/${var.project_name}-api"]
+
+  # 和主 stack 的 frontend.tf 同一個命名規則
+  frontend_bucket_arn = "arn:aws:s3:::${var.project_name}-frontend-${local.account_id}"
+  # CloudFront 的 distribution ID 在主 stack 建立時才產生，這裡只能限定在這個帳號
+  cloudfront_arn_prefix = "arn:aws:cloudfront::${local.account_id}"
 }
 
 data "aws_iam_policy_document" "github_deploy" {
@@ -118,7 +123,46 @@ data "aws_iam_policy_document" "github_deploy" {
     resources = ["arn:aws:apigateway:${var.region}::/apis/*", "arn:aws:apigateway:${var.region}::/tags/*"]
   }
 
-  # --- 唯一的寫入權限：更新這一個 Lambda 的程式碼和設定 ---
+  statement {
+    # terraform plan 讀 bucket 的各項設定（加密、公開存取封鎖、policy……）
+    sid = "ReadFrontendBucket"
+    actions = [
+      "s3:GetBucket*",
+      "s3:GetEncryptionConfiguration",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration",
+      "s3:GetAccelerateConfiguration",
+      "s3:ListBucket", # aws s3 sync 也要用它比對哪些檔案需要上傳或刪除
+    ]
+    resources = [local.frontend_bucket_arn]
+  }
+
+  statement {
+    sid       = "ReadCloudFront"
+    actions   = ["cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:ListTagsForResource"]
+    resources = ["${local.cloudfront_arn_prefix}:distribution/*"]
+  }
+
+  statement {
+    sid       = "ReadOriginAccessControl"
+    actions   = ["cloudfront:GetOriginAccessControl"]
+    resources = ["${local.cloudfront_arn_prefix}:origin-access-control/*"]
+  }
+
+  # --- 前端部署：上傳、刪除舊檔，清除 CloudFront 快取 ---
+  statement {
+    sid       = "UploadFrontend"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["${local.frontend_bucket_arn}/*"]
+  }
+
+  statement {
+    sid       = "InvalidateCloudFront"
+    actions   = ["cloudfront:CreateInvalidation"]
+    resources = ["${local.cloudfront_arn_prefix}:distribution/*"]
+  }
+
+  # --- 後端部署：更新這一個 Lambda 的程式碼和設定 ---
   # 沒有 iam:PassRole，所以無法把 Lambda 換成別的角色
   statement {
     sid       = "UpdateLambda"

@@ -95,7 +95,7 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
 **`VITE_API_BASE_URL` 只在 `config.js` 讀取。**
 
 - 本機開發：設成 API Gateway 網址，靠 CORS 跨網域呼叫。
-- 正式環境：不設定，前端用相對路徑 `/api/...`，由 CloudFront 轉給 API Gateway（見第 5 節），所以網址不會寫死在任何元件裡。
+- 正式環境：不設定，前端用相對路徑 `/api/...`，由 CloudFront 轉給 API Gateway（見第 5 節），所以網址不會寫死在任何元件裡，也不需要 CORS。
 
 **前端沒有任何機密。** `VITE_` 開頭的環境變數會被直接打包進 JavaScript，任何人打開瀏覽器開發者工具都看得到，所以只能放公開資訊，例如 API 網址。這個專案的 API 本來就是公開的唯讀 API，不需要金鑰。
 
@@ -191,9 +191,9 @@ SearchForm ──onSearch(city)──► useWeather ──► weatherApi.fetchWe
 
 CI 的 `Frontend` job 在每個 PR 都會執行 `npm ci`、`npm test`、`npm run build`。
 
-## 5. 部署到 S3 + CloudFront：Terraform 設計建議（尚未實作）
+## 5. 部署到 S3 + CloudFront
 
-這一節是設計建議，還沒有寫成 Terraform，也沒有建立任何資源。
+Terraform 在 `terraform/main/frontend.tf`，部署步驟在 `.github/workflows/ci-cd.yml` 的 `deploy` job。合併到 main 後，CD 會自動打包前端、上傳到 S3、清除 CloudFront 快取，再做冒煙測試。
 
 ```
 瀏覽器 ──HTTPS──► CloudFront
@@ -241,22 +241,54 @@ bucket policy 的重點是 `AWS:SourceArn` 條件。沒有這個條件，帳號�
 
 改成同網域之後，正式環境不再需要 CORS。`cors_allow_origins` 可以維持只有 `http://localhost:5173`，給本機開發使用。
 
-### 部署流程的變更
+### 部署流程
 
-1. `terraform apply`（在本機）建立 bucket 和 distribution，output 加上 `frontend_bucket`、`cloudfront_distribution_id`、`cloudfront_url`。
-2. 在 `ci-cd.yml` 的 `deploy` job 加三個步驟：
-   1. `npm ci && npm run build`，不設定 `VITE_API_BASE_URL`。
-   2. 上傳檔案：
-      - 先傳 `aws s3 sync dist/assets s3://<bucket>/assets --delete --cache-control "public,max-age=31536000,immutable"`。Vite 打包出來的檔名含 hash，內容一變檔名就變，所以可以永久快取；`--delete` 清掉舊版的檔案。
-      - 再傳 `aws s3 cp dist/index.html s3://<bucket>/index.html --cache-control "no-cache"`。`index.html` 每次都要拿最新版，才會指到新的 assets。先傳 assets 再傳 `index.html`，使用者就不會拿到指向還不存在檔案的首頁。
-      - `favicon.svg` 用 `aws s3 cp` 另外上傳。
-   3. `aws cloudfront create-invalidation --paths "/index.html"`。
-3. 部署角色加上最小權限（寫在 bootstrap 的 `github_oidc.tf`）：
-   - 對 `weathercast-frontend-*` bucket：`s3:ListBucket`、`s3:PutObject`、`s3:DeleteObject`。
-   - 對這一個 distribution：`cloudfront:CreateInvalidation`。
-   - `terraform plan` 要讀新資源，所以也要加上 `s3:GetBucket*`、`cloudfront:GetDistribution`、`cloudfront:GetOriginAccessControl`、`cloudfront:ListTagsForResource` 等讀取權限。
-4. `scripts/check_plan.py` 不用改：新增 CloudFront 或 S3 屬於基礎設施變更，本來就應該由人在本機 apply。
-5. 冒煙測試加一個檢查：`GET <cloudfront_url>/api/health` 回 200，確認 CloudFront 轉發 `/api/*` 正常。
+`deploy` job 在原本的 Lambda 部署之後多做這幾步：
+
+1. `npm ci && npm run build`，不設定 `VITE_API_BASE_URL`，前端用相對路徑 `/api`。
+2. 上傳檔案：
+   - 先傳 `dist/assets`，`Cache-Control: public,max-age=31536000,immutable`。Vite 打包出來的檔名含 hash，內容一變檔名就變，所以可以永久快取；`--delete` 清掉舊版的檔案。
+   - 再傳其他檔案（`index.html`、`favicon.svg`），`Cache-Control: no-cache`。`index.html` 每次都要拿最新版，才會指到新的 assets。先傳 assets 再傳 `index.html`，使用者就不會拿到指向還不存在檔案的首頁。
+3. `aws cloudfront create-invalidation --paths "/" "/index.html"`，讓 CloudFront 丟掉舊的首頁。
+4. 冒煙測試：直接打 API Gateway 一次，再透過 CloudFront 網址打一次（`--frontend`），確認首頁是 WeatherCast 的 HTML，而且 `/api/*` 有轉給 API Gateway。
+
+部署角色（`terraform/bootstrap/github_oidc.tf`）新增的權限：
+
+| 權限 | 範圍 | 用途 |
+|---|---|---|
+| `s3:PutObject`、`s3:DeleteObject` | 只有 `weathercast-frontend-<帳號 ID>/*` | 上傳、刪除舊檔 |
+| `s3:ListBucket`、`s3:GetBucket*` 等讀取 | 只有這個 bucket | `aws s3 sync` 比對檔案、`terraform plan` 讀設定 |
+| `cloudfront:CreateInvalidation` | 這個帳號的 distribution | 清除快取。distribution ID 在主 stack 建立時才產生，bootstrap 無法事先指定 |
+| `cloudfront:Get*`（3 個） | 這個帳號的 distribution 和 OAC | `terraform plan` 讀設定 |
+
+部署角色仍然不能建立或刪除任何資源，也不能改 IAM。`scripts/check_plan.py` 不用改：新增 CloudFront 或 S3 屬於基礎設施變更，本來就應該由人在本機 apply。
+
+### 已經部署過的環境怎麼升級
+
+順序很重要：**先在本機 apply，再合併 PR。** 如果先合併，CD 的 plan 會看到 6 個新資源，`check_plan.py` 會擋下來，Deploy 會失敗（不會改到任何東西）。這時照下面做完，再到 GitHub Actions 手動重新執行（`workflow_dispatch`）即可。
+
+在 PowerShell（記得先帶入 AWS 臨時憑證和 region）：
+
+```powershell
+cd E:\weathercast-cloud
+git fetch
+git checkout feat/frontend-hosting
+
+# 1. 部署角色加權限：預期 Plan: 0 to add, 1 to change, 0 to destroy.（aws_iam_role_policy.github_deploy）
+cd terraform\bootstrap
+terraform plan "-out=bootstrap.tfplan"
+terraform apply bootstrap.tfplan
+
+# 2. 建立前端資源：預期 Plan: 6 to add, 0 to change, 0 to destroy.
+cd ..\main
+terraform plan "-out=main.tfplan"
+terraform apply main.tfplan             # CloudFront 要 3 到 10 分鐘
+terraform output -raw frontend_url      # 前端網址
+```
+
+第 2 步的 plan 應該只有 `cloudfront` 和 `s3_bucket` 開頭的 6 個資源，而且都是 `will be created`。出現其他資源要更新或刪除就先停下來。
+
+apply 完成後合併 PR，CD 會上傳前端。部署成功後打開 `frontend_url` 就能看到網站。
 
 ### 費用
 
@@ -275,7 +307,8 @@ bucket policy 的重點是 `AWS:SourceArn` 條件。沒有這個條件，帳號�
 
 ## 6. 目前限制
 
-- 前端還沒部署到 AWS，只能在本機執行。上面的 S3 + CloudFront 是設計建議。
+- 用 CloudFront 預設的 `*.cloudfront.net` 網址，沒有自訂網域。
+- 刪除主 stack 時，CloudFront 要先停用再刪除，可能要 10 分鐘以上。
 - 測試用 jsdom 模擬瀏覽器，沒有真實瀏覽器的端對端測試。開發時有用真實瀏覽器（Chromium）搭配線上 API 手動確認過桌面版和手機版畫面。
 - 沒有前端的覆蓋率報告。
 - 動態背景的外觀、對比和快速切換是用真實瀏覽器（Chromium）手動跑腳本確認的，沒有放進 CI。
