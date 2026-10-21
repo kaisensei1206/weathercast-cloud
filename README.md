@@ -1,8 +1,8 @@
 # WeatherCast Cloud API
 
-> 後端 API 已部署在 AWS（ap-northeast-1），合併到 main 會由 GitHub Actions 自動部署。前端透過 S3 + CloudFront 上線的 Terraform 已完成，要在本機 apply 一次才會建立（見 docs/frontend.md 第 5 節）。
+> 前後端都已部署在 AWS（ap-northeast-1），透過 CloudFront 提供。合併到 main 後，GitHub Actions 會自動測試，並部署 Lambda 程式碼和前端。
 
-查詢台灣 22 縣市目前天氣的 Serverless API。後端使用 Python，透過 Open-Meteo 取得氣象資料，部署在 AWS，所有雲端資源以 Terraform 管理，並用 GitHub Actions 自動測試與部署。
+查詢台灣 22 縣市目前天氣的 Serverless 服務。後端使用 Python，透過 Open-Meteo 取得氣象資料，另外從交通部觀光署的開放資料整理出今年全臺的煙火活動。前端整頁是一張臺灣地圖，標出煙火活動，天氣特效疊在地圖上。所有雲端資源以 Terraform 管理，並用 GitHub Actions 自動測試與部署。
 
 ## API
 
@@ -55,7 +55,7 @@ Open-Meteo 失敗時，如果快取裡有 24 小時內的資料，會回 200 和
 
 ## 快取
 
-每個城市在 DynamoDB 存一筆資料，10 分鐘內的查詢直接回傳快取，不呼叫 Open-Meteo。資料表設計、TTL 與故障處理見 [docs/cache.md](docs/cache.md)。
+每個城市在 DynamoDB 存一筆資料，10 分鐘內的查詢直接回傳快取，不呼叫 Open-Meteo。煙火活動也存在同一張表（key 是 `fireworks:tourism`），規則相同。資料表設計、TTL 與故障處理見 [docs/cache.md](docs/cache.md)。
 
 ```mermaid
 flowchart LR
@@ -72,38 +72,46 @@ flowchart LR
 
 DynamoDB 故障時只記 log，照樣查 Open-Meteo，使用者不受影響。
 
-## 預定功能
+## 功能
 
 - `GET /api/health`：服務健康檢查
 - `GET /api/cities`：支援的縣市清單
-- `GET /api/weather?city=Tainan`：查詢目前天氣（溫度、體感溫度、濕度、降雨量、風速、天氣代碼）
+- `GET /api/weather?city=Tainan`：目前天氣（溫度、體感溫度、濕度、降雨量、風速、天氣代碼）
+- `GET /api/fireworks`：今年全臺的煙火相關活動
 - DynamoDB 快取：減少重複呼叫外部 API；外部 API 失敗時回傳較舊的資料並標示
-- React 前端：輸入或選擇縣市並顯示天氣
+- React 前端：整頁是地圖，查詢面板浮在上面；點煙火活動，地圖會移過去；查詢後天氣特效（雲、雨、雪、霧、閃電）半透明地疊在地圖上
 
 ## 架構
 
 ```mermaid
 flowchart LR
-  U[使用者瀏覽器] --> CF[CloudFront]
+  U[使用者瀏覽器<br/>React + Leaflet] --> CF[CloudFront]
+  U -- 地圖圖磚 --> OSM[OpenStreetMap]
   CF -- "/*" --> S3[(S3 私有 bucket<br/>前端靜態檔)]
   CF -- "/api/*" --> APIGW[API Gateway<br/>HTTP API]
   APIGW --> L[Lambda<br/>Python 3.12]
-  L <--> DDB[(DynamoDB<br/>快取 + TTL)]
-  L --> OM[Open-Meteo API]
+  L <--> DDB[(DynamoDB<br/>天氣與煙火快取)]
+  L --> OM[Open-Meteo]
   L --> TW[交通部觀光署 活動資料]
-  L -.-> CW[CloudWatch Logs / Alarms]
-  GA[GitHub Actions] -- OIDC --> TF[Terraform] -.-> CF & APIGW & L & DDB
+  L -.-> CW[CloudWatch Logs]
+  GA[GitHub Actions] -- "OIDC：只更新 Lambda、上傳前端" --> TF[Terraform]
+  PC[本機] -- "基礎設施變更：看過 plan 再 apply" --> TF
+  TF -.-> CF & APIGW & L & DDB & S3
 ```
 
 | 元件 | 負責 |
 |---|---|
-| API Gateway HTTP API | 對外 HTTP 入口、路由、節流 |
-| Lambda（Python 3.12） | 輸入驗證、查快取、呼叫 Open-Meteo、整理回應 |
+| CloudFront | 唯一的對外網域：`/*` 給 S3 的前端，`/api/*` 給 API Gateway；前後端同網域，線上不需要 CORS |
+| S3 | 前端靜態檔；bucket 私有，只有 CloudFront 透過 OAC 能讀 |
+| API Gateway HTTP API | 4 條路由、節流（每秒 10 次、瞬間 20 次） |
+| Lambda（Python 3.12） | 輸入驗證、查快取、呼叫外部資料來源、整理回應 |
 | Open-Meteo | 第三方氣象資料（免 API key） |
+| 交通部觀光署 | 活動開放資料（免 API key，每天更新），從中挑出煙火活動 |
 | DynamoDB | 快取查詢結果，TTL 自動清除舊資料 |
-| CloudWatch | 執行紀錄與錯誤告警 |
-| Terraform | 建立與更新所有 AWS 資源 |
-| GitHub Actions | PR 時執行測試，合併到 main 後自動部署 |
+| OpenStreetMap | 前端地圖的圖磚，瀏覽器直接下載，不經過我們的服務 |
+| CloudWatch | Lambda 與 API Gateway 的執行紀錄（還沒設告警） |
+| Terraform | 建立與更新所有 AWS 資源，分 bootstrap 和 main 兩個 stack |
+| GitHub Actions | PR 時執行測試；合併到 main 後只自動更新 Lambda 程式碼和前端，其他基礎設施變更由人在本機 apply |
 
 ## 專案結構
 
@@ -145,7 +153,7 @@ python scripts/invoke_local.py /api/weather                # 400
 
 ## 基礎設施
 
-所有 AWS 資源都在 `terraform/` 用 Terraform 管理：Lambda（Python 3.12、arm64）、API Gateway HTTP API、DynamoDB、IAM、CloudWatch Logs。資源說明、依賴關係，以及 Terraform 和 CI/CD 如何分工，見 [docs/infrastructure.md](docs/infrastructure.md)。
+所有 AWS 資源都在 `terraform/` 用 Terraform 管理：Lambda（Python 3.12、arm64）、API Gateway HTTP API、DynamoDB、IAM、CloudWatch Logs、S3、CloudFront。資源說明、依賴關係，以及 Terraform 和 CI/CD 如何分工，見 [docs/infrastructure.md](docs/infrastructure.md)。
 
 不需要 AWS 帳號也能做的檢查：
 
@@ -175,17 +183,20 @@ npm run build
 
 從建立 AWS 帳號權限、Terraform plan 與 apply、線上測試、查看 CloudWatch Logs、排除錯誤，到清除資源的完整步驟，見 [docs/deployment.md](docs/deployment.md)。
 
-部署後，每個 PR 由 GitHub Actions 跑測試與 Terraform 檢查，合併到 main 後用 OIDC 登入 AWS 自動部署並做冒煙測試，見 [docs/cicd.md](docs/cicd.md)。
+部署後，每個 PR 由 GitHub Actions 跑測試與 Terraform 檢查。合併到 main 後用 OIDC 登入 AWS，確認 plan 只有 Lambda 程式碼更新才自動部署，接著上傳前端並做冒煙測試；其他基礎設施變更要在本機 apply，見 [docs/cicd.md](docs/cicd.md)。
 
 ## 開發進度
 
 - [x] 技術方案設計
 - [x] 專案骨架
-- [x] 後端 MVP（/health、/weather）
+- [x] 後端 MVP（/health、/cities、/weather）
 - [x] 單元測試
 - [x] DynamoDB 快取（資料表在 Terraform 階段建立）
 - [x] Terraform
 - [x] 部署手冊與實際部署（2026-10-19 上線）
 - [x] GitHub Actions CI/CD（啟用步驟見 docs/cicd.md）
 - [x] React 前端與動態天氣背景
-- [x] 前端部署：S3 + CloudFront（Terraform 與 CD 已完成，見 docs/frontend.md 第 5 節）
+- [x] 前端部署：S3 + CloudFront（見 docs/frontend.md 第 5 節）
+- [x] 煙火活動地圖（`/api/fireworks`，見 docs/fireworks.md）
+- [x] 地圖改成整頁背景，天氣特效疊在地圖上
+- [ ] CloudWatch 告警
