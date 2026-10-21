@@ -8,14 +8,21 @@ import FireworksMap from './FireworksMap.jsx'
 
 // jsdom 沒有真的版面，換成假的 Leaflet，只檢查元件怎麼使用它。
 // vitest 設定了 restoreMocks，vi.fn() 的實作每個測試都會被清掉，所以回傳值用一般函式。
+// 假的投影：1 度 = 1 px，x 是經度、y 是緯度，方便算出地圖中心被移了多少。
 vi.mock('leaflet', () => {
+  const point = (x, y) => ({ x, y, subtract: ([dx, dy]) => point(x - dx, y - dy) })
   const map = {
-    fitBounds() {
+    fitOptions: null,
+    fitBounds(bounds, options) {
+      this.fitOptions = options
       return this
     },
+    project: ([lat, lon]) => point(lon, lat),
+    unproject: (p) => [p.y, p.x],
     flyTo: vi.fn(),
     remove: vi.fn(),
   }
+  const control = () => ({ addTo() {} })
   const group = {
     layers: [],
     addTo() {
@@ -45,6 +52,7 @@ vi.mock('leaflet', () => {
   return {
     default: {
       map: vi.fn(() => map),
+      control: { attribution: control, zoom: control },
       tileLayer: vi.fn(() => ({ addTo() {} })),
       layerGroup: vi.fn(() => group),
       marker,
@@ -58,8 +66,15 @@ vi.mock('../api/weatherApi.js', () => ({ fetchFireworks: vi.fn() }))
 const group = () => L.layerGroup.mock.results[0].value
 const markerNames = () => group().layers.map((m) => m.options.title)
 
+function setViewport(width, height) {
+  window.innerWidth = width
+  window.innerHeight = height
+}
+
 describe('FireworksMap', () => {
   beforeEach(() => {
+    setViewport(1280, 800)
+    window.scrollTo = vi.fn()
     L.map.mockClear()
     L.layerGroup.mockClear()
     vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['Date'] })
@@ -75,7 +90,36 @@ describe('FireworksMap', () => {
     expect(screen.getByText(/2026 年全臺的煙火活動/)).toBeInTheDocument()
     expect(markerNames()).toEqual(FIREWORKS.events.map((e) => e.name))
     expect(L.map).toHaveBeenCalledTimes(1)
-    expect(L.map.mock.calls[0][1]).toMatchObject({ scrollWheelZoom: false })
+  })
+
+  it('puts the map behind the whole page, outside the panel', async () => {
+    const { container } = render(<FireworksMap />)
+    await screen.findByRole('list')
+
+    const map = screen.getByRole('region', { name: /煙火活動地圖/ })
+    expect(map).toHaveClass('map-bg')
+    expect(map.parentElement).toBe(document.body)
+    expect(container).not.toContainElement(map)
+    expect(L.map.mock.calls[0][0]).toBe(map)
+  })
+
+  it('fits Taiwan into the part of the screen the panel does not cover', async () => {
+    render(<FireworksMap />)
+    await screen.findByRole('list')
+    expect(L.map.mock.results[0].value.fitOptions).toEqual({
+      paddingTopLeft: [456, 24], // 桌面：左邊 432px 是面板
+      paddingBottomRight: [24, 24],
+    })
+  })
+
+  it('fits Taiwan above the bottom sheet on phones', async () => {
+    setViewport(375, 800)
+    render(<FireworksMap />)
+    await screen.findByRole('list')
+    expect(L.map.mock.results[0].value.fitOptions).toEqual({
+      paddingTopLeft: [24, 24],
+      paddingBottomRight: [24, 464], // 手機：下方 55%（440px）是面板
+    })
   })
 
   it('marks each event as past, ongoing or upcoming, and fireworks or maybe', async () => {
@@ -112,9 +156,24 @@ describe('FireworksMap', () => {
 
     await user.click(await screen.findByRole('button', { name: /日月潭/ }))
 
+    // 地圖中心往左移半個面板（216px），標記就落在右邊看得到的那一塊中間
     const map = L.map.mock.results[0].value
-    expect(map.flyTo).toHaveBeenCalledWith([23.8645, 120.9119], 11, expect.any(Object))
+    expect(map.flyTo).toHaveBeenCalledWith([23.8645, 120.9119 - 216], 11, expect.any(Object))
     expect(group().layers[1].openPopup).toHaveBeenCalled()
+    expect(window.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('on phones, keeps the event above the bottom sheet and scrolls back to the map', async () => {
+    setViewport(375, 800)
+    const user = userEvent.setup()
+    render(<FireworksMap />)
+
+    await user.click(await screen.findByRole('button', { name: /日月潭/ }))
+
+    // 地圖中心往下移半個面板（220px），標記落在上方看得到的那一塊中間
+    const map = L.map.mock.results[0].value
+    expect(map.flyTo).toHaveBeenCalledWith([23.8645 + 220, 120.9119], 11, expect.any(Object))
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
   })
 
   it('builds popups as text, never as HTML, and drops unsafe links', async () => {

@@ -8,10 +8,11 @@ const LIGHTNING_MIN_MS = 7000
 const LIGHTNING_MAX_MS = 15000
 
 /**
- * 整個畫面後方的天氣背景。純裝飾：pointer-events: none、aria-hidden，不影響操作與閱讀。
+ * 疊在背景地圖上的天氣特效。純裝飾：pointer-events: none、aria-hidden，不影響拖曳地圖與閱讀。
  *
- * - 天空、太陽、月亮、雲、霧用 CSS（漸層加 transform 動畫，交給 GPU）。
- * - 雨、雪、星星用一個 Canvas，引擎只建立一次，換天氣只更新設定。
+ * - 沒有天空顏色：地圖就是背景，只依天氣把地圖稍微壓暗（--shade），晚上更暗。
+ * - 雲、霧用 CSS（漸層加 transform 動畫，交給 GPU），半透明，看得到下面的地圖。
+ * - 雨、雪用一個 Canvas，引擎只建立一次，換天氣只更新設定。
  * - 數值都放在 CSS 變數，換天氣時由 CSS transition 慢慢淡入淡出，不會閃一下。
  */
 export default function WeatherBackdrop({ scene }) {
@@ -35,10 +36,10 @@ export default function WeatherBackdrop({ scene }) {
     engineRef.current?.setReducedMotion(reducedMotion)
   }, [reducedMotion])
 
-  const { precipitation, stars } = effects
+  const { precipitation } = effects
   useEffect(() => {
-    engineRef.current?.setConfig({ precipitation, stars })
-  }, [precipitation, stars])
+    engineRef.current?.setConfig({ precipitation })
+  }, [precipitation])
 
   // 閃電：隨機間隔觸發一次柔和的閃光；只改 class，不經過 React state，不會重新渲染
   const lightning = effects.lightning && !reducedMotion
@@ -63,14 +64,9 @@ export default function WeatherBackdrop({ scene }) {
   }, [lightning])
 
   const style = {
-    '--sun': effects.sun,
-    '--moon': effects.moon,
+    '--shade': effects.shade,
     '--clouds': effects.clouds,
     '--fog': effects.fog,
-  }
-  if (effects.skyTop) {
-    style['--sky-top'] = effects.skyTop
-    style['--sky-bottom'] = effects.skyBottom
   }
 
   return (
@@ -81,23 +77,15 @@ export default function WeatherBackdrop({ scene }) {
       data-kind={scene?.kind ?? 'idle'}
       data-night={scene?.night ? 'true' : 'false'}
       data-cloud-shade={effects.cloudShade}
-      data-sky={effects.skyTop ? 'on' : 'off'}
       style={style}
     >
-      <div className="wx__sky" />
-      <div className="wx__sun">
-        <div className="wx__sun-glow" />
-        <div className="wx__sun-rays" />
-        <div className="wx__flare" />
-      </div>
-      <div className="wx__moon" />
+      <div className="wx__shade" />
       <canvas ref={canvasRef} className="wx__canvas" />
       <div className="wx__clouds wx__clouds--far" />
       <div className="wx__clouds wx__clouds--near" />
       <div className="wx__fog wx__fog--a" />
       <div className="wx__fog wx__fog--b" />
       <div ref={flashRef} className="wx__flash" />
-      <div className="wx__scrim" />
     </div>
   )
 }

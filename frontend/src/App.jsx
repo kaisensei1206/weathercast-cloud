@@ -6,9 +6,9 @@ import WeatherCard from './components/WeatherCard.jsx'
 import { useCities } from './hooks/useCities.js'
 import { useWeather } from './hooks/useWeather.js'
 import { useWeatherScene } from './hooks/useWeatherScene.js'
-import { skyTone } from './weather/effects.js'
 
-// 地圖套件（Leaflet）比較大，分成另一個檔案，等畫面出來後才下載，不拖慢首頁
+// 地圖套件（Leaflet）比較大，分成另一個檔案，等畫面出來後才下載，不拖慢首頁。
+// 地圖本身是整個畫面的背景（FireworksMap 用 portal 放到 <body>），這裡只放活動清單
 const FireworksMap = lazy(() => import('./components/FireworksMap.jsx'))
 
 export default function App() {
@@ -18,8 +18,9 @@ export default function App() {
 
   return (
     <>
+      {/* 由下往上：地圖（z-index 0）、天氣特效（1）、查詢面板（2） */}
       <WeatherBackdrop scene={scene} />
-      <div className="app" data-sky-tone={skyTone(scene) ?? 'theme'}>
+      <div className="app">
         <header className="app__header">
           <h1>WeatherCast</h1>
           <p>查詢臺灣 22 縣市的目前天氣</p>
